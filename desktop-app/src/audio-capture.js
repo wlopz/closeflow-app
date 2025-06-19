@@ -62,6 +62,7 @@ class SystemAudioCapture {
         (async () => {
           try {
             console.log('🎤 Starting audio capture in renderer process');
+            console.log('🔍 Selected source ID:', '${this.selectedSourceId}');
             
             // Clean up any existing streams
             if (window.closeFlowSystemStream) {
@@ -76,20 +77,29 @@ class SystemAudioCapture {
               window.closeFlowMediaRecorder = null;
             }
 
-            console.log('🎤 Attempting getUserMedia...');
+            console.log('🎤 About to call getUserMedia with source:', '${this.selectedSourceId}');
+            
+            // Wrap getUserMedia in try-catch for better error handling
+            let stream;
+            try {
+              stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                  mandatory: {
+                    chromeMediaSource: 'desktop',
+                    chromeMediaSourceId: '${this.selectedSourceId}'
+                  }
+                },
+                video: false
+              });
+              console.log('✅ getUserMedia successful! Stream:', stream);
+            } catch (getUserMediaError) {
+              console.error('❌ getUserMedia failed:', getUserMediaError);
+              console.error('❌ Error name:', getUserMediaError.name);
+              console.error('❌ Error message:', getUserMediaError.message);
+              console.error('❌ Error stack:', getUserMediaError.stack);
+              throw getUserMediaError;
+            }
 
-            // Get the audio stream from the selected source using desktopCapturer
-            const stream = await navigator.mediaDevices.getUserMedia({
-              audio: {
-                mandatory: {
-                  chromeMediaSource: 'desktop',
-                  chromeMediaSourceId: '${this.selectedSourceId}'
-                }
-              },
-              video: false
-            });
-
-            console.log('✅ getUserMedia successful!');
             window.closeFlowSystemStream = stream;
 
             // Create MediaRecorder to capture audio data
@@ -120,14 +130,20 @@ class SystemAudioCapture {
             };
 
             // Start recording
+            console.log('🎤 Starting MediaRecorder...');
             mediaRecorder.start(250); // Send data every 250ms
-            console.log('✅ MediaRecorder started.');
+            console.log('✅ MediaRecorder started successfully');
 
             console.log('✅ System audio capture started successfully');
             return true;
 
           } catch (error) {
             console.error('❌ Failed to start system audio capture:', error);
+            console.error('❌ Error details:', {
+              name: error.name,
+              message: error.message,
+              stack: error.stack
+            });
             return false;
           }
         })()
