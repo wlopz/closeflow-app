@@ -132,15 +132,19 @@ class CloseFlowDesktop {
       this.mainWindow.webContents.executeJavaScript(`
         window.electronAPI = {
           sendAudioData: (audioData) => {
-            // Convert Blob to ArrayBuffer and send via IPC
+            // FIXED: Convert Blob to ArrayBuffer properly for IPC
             if (audioData instanceof Blob) {
-              audioData.arrayBuffer().then(buffer => {
+              const reader = new FileReader();
+              reader.onload = function() {
                 const { ipcRenderer } = require('electron');
-                // Send as Buffer to avoid cloning issues
-                ipcRenderer.send('audio-data', Array.from(new Uint8Array(buffer)));
-              }).catch(err => {
-                console.error('Error converting audio data:', err);
-              });
+                // Send as Uint8Array which can be serialized
+                const uint8Array = new Uint8Array(reader.result);
+                ipcRenderer.send('audio-data', Array.from(uint8Array));
+              };
+              reader.onerror = function(err) {
+                console.error('Error reading audio blob:', err);
+              };
+              reader.readAsArrayBuffer(audioData);
             }
           }
         };
@@ -209,7 +213,7 @@ class CloseFlowDesktop {
   }
 
   setupIPC() {
-    // Handle audio data from renderer process
+    // Handle audio data from renderer process - FIXED: Proper error handling
     ipcMain.on('audio-data', (event, audioArray) => {
       try {
         if (this.systemAudioCapture && Array.isArray(audioArray)) {
@@ -218,6 +222,7 @@ class CloseFlowDesktop {
         }
       } catch (error) {
         console.error('Error handling audio data:', error);
+        // Don't crash the app, just log the error
       }
     });
 
