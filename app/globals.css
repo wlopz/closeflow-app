@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --foreground: rgb(0 0 0);
+    --background: rgb(255 255 255);
+    --primary: rgb(0 0 0);
+    --primary-foreground: rgb(255 255 255);
+    --secondary: rgb(245 245 245);
+    --secondary-foreground: rgb(0 0 0);
+    --muted: rgb(245 245 245);
+    --muted-foreground: rgb(115 115 115);
+    --accent: rgb(245 245 245);
+    --accent-foreground: rgb(0 0 0);
+    --destructive: rgb(239 68 68);
+    --destructive-foreground: rgb(255 255 255);
+    --border: rgb(229 229 229);
+    --input: rgb(229 229 229);
+    --ring: rgb(0 0 0);
+    --radius: 0.5rem;
+    --chart-1: rgb(239 68 68);
+    --chart-2: rgb(34 197 94);
+    --chart-3: rgb(59 130 246);
+    --chart-4: rgb(168 85 247);
+    --chart-5: rgb(236 72 153);
+  }
+
+  .dark {
+    --foreground: rgb(255 255 255);
+    --background: rgb(0 0 0);
+    --primary: rgb(255 255 255);
+    --primary-foreground: rgb(0 0 0);
+    --secondary: rgb(38 38 38);
+    --secondary-foreground: rgb(255 255 255);
+    --muted: rgb(38 38 38);
+    --muted-foreground: rgb(163 163 163);
+    --accent: rgb(38 38 38);
+    --accent-foreground: rgb(255 255 255);
+    --destructive: rgb(127 29 29);
+    --destructive-foreground: rgb(255 255 255);
+    --border: rgb(38 38 38);
+    --input: rgb(38 38 38);
+    --ring: rgb(212 212 212);
+    --chart-1: rgb(239 68 68);
+    --chart-2: rgb(34 197 94);
+    --chart-3: rgb(59 130 246);
+    --chart-4: rgb(168 85 247);
+    --chart-5: rgb(236 72 153);
+  }
+}
+
+@layer base {
+  /* * {
+    @apply border;
+  } */
+  body {
+    @apply bg-background text-foreground;
+  }
+}

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloseFlow Desktop</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app">
+        <header class="header">
+            <div class="logo">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 11h3l3-7 4 14 4-7h3"/>
+                </svg>
+                <h1>CloseFlow</h1>
+            </div>
+            <div class="status-indicator" id="connectionStatus">
+                <div class="dot"></div>
+                <span>Connecting...</span>
+            </div>
+        </header>
+
+        <main class="main">
+            <!-- Zoom Detection Section -->
+            <section class="section">
+                <h2>Zoom Meeting Detection</h2>
+                <div class="status-card" id="zoomStatus">
+                    <div class="status-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M15.5 2H8.6c-.4 0-.8.2-1.1.5-.3.3-.5.7-.5 1.1v16.8c0 .4.2.8.5 1.1.3.3.7.5 1.1.5h6.9c.4 0 .8-.2 1.1-.5.3-.3.5-.7.5-1.1V3.6c0-.4-.2-.8-.5-1.1-.3-.3-.7-.5-1.1-.5z"/>
+                        </svg>
+                    </div>
+                    <div class="status-content">
+                        <h3 id="zoomStatusTitle">Searching for Zoom...</h3>
+                        <p id="zoomStatusDescription">Looking for active Zoom meetings</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Audio Device Selection -->
+            <section class="section">
+                <h2>Audio Devices</h2>
+                
+                <div class="device-group">
+                    <label for="inputDevice">Microphone (Input)</label>
+                    <select id="inputDevice" class="device-select">
+                        <option value="">Loading devices...</option>
+                    </select>
+                    <div class="audio-level">
+                        <div class="level-bar">
+                            <div class="level-fill" id="inputLevel"></div>
+                        </div>
+                        <span class="level-text" id="inputLevelText">0%</span>
+                    </div>
+                </div>
+
+                <div class="device-group">
+                    <label for="outputDevice">Speakers (Output)</label>
+                    <select id="outputDevice" class="device-select">
+                        <option value="">Loading devices...</option>
+                    </select>
+                    <div class="audio-level">
+                        <div class="level-bar">
+                            <div class="level-fill" id="outputLevel"></div>
+                        </div>
+                        <span class="level-text" id="outputLevelText">0%</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Call Analysis Controls -->
+            <section class="section">
+                <h2>Call Analysis</h2>
+                <div class="analysis-controls">
+                    <button id="startAnalysisBtn" class="btn btn-primary" disabled>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="5,3 19,12 5,21"/>
+                        </svg>
+                        Start Analysis
+                    </button>
+                    <button id="stopAnalysisBtn" class="btn btn-secondary" disabled>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="6" y="6" width="12" height="12"/>
+                        </svg>
+                        Stop Analysis
+                    </button>
+                </div>
+                
+                <div class="analysis-status" id="analysisStatus">
+                    <p>Ready to analyze when Zoom meeting is detected</p>
+                </div>
+            </section>
+
+            <!-- Quick Actions -->
+            <section class="section">
+                <h2>Quick Actions</h2>
+                <div class="quick-actions">
+                    <button class="btn btn-outline" id="openWebAppBtn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                            <polyline points="15,3 21,3 21,9"/>
+                            <line x1="10" y1="14" x2="21" y2="3"/>
+                        </svg>
+                        Open Web App
+                    </button>
+                    <button class="btn btn-outline" id="settingsBtn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"/>
+                            <path d="M12 1v6m0 6v6m11-7h-6m-6 0H1"/>
+                        </svg>
+                        Settings
+                    </button>
+                </div>
+            </section>
+        </main>
+
+        <!-- Notifications -->
+        <div id="notifications" class="notifications"></div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>

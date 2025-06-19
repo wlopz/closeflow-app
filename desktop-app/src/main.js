@@ -1,0 +1,830 @@
+const { app, BrowserWindow, ipcMain, Menu, Tray, dialog, systemPreferences } = require('electron');
+const path = require('path');
+const { execSync, spawn } = require('child_process');
+
+class CloseFlowDesktop {
+  constructor() {
+    this.mainWindow = null;
+    this.tray = null;
+    this.trayMenu = null;
+    this.isZoomDetected = false;
+    this.isCallActive = false;
+    this.zoomCheckInterval = null;
+    this.audioDevices = { input: [], output: [] };
+    this.selectedDevices = { input: null, output: null };
+    this.audioLevels = { input: 0, output: 0 };
+    this.audioMonitorInterval = null;
+    this.connectionCheckInterval = null;
+    this.messagePollingInterval = null;
+    this.isConnected = false;
+    this.webAppUrl = 'http://localhost:3000';
+    this.pingInterval = null;
+    this.isStartingCall = false;
+    this.isStoppingCall = false;
+  }
+
+  async initialize() {
+    await this.createWindow();
+    this.setupTray();
+    this.setupIPC();
+    this.startZoomDetection();
+    await this.requestPermissions();
+    await this.loadAudioDevices();
+    
+    // Start connection management
+    this.startConnectionManagement();
+  }
+
+  async createWindow() {
+    this.mainWindow = new BrowserWindow({
+      width: 400,
+      height: 600,
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false
+      },
+      titleBarStyle: 'default',
+      resizable: true,
+      movable: true,
+      show: false,
+      frame: true,
+      minimizable: true,
+      maximizable: false
+    });
+
+    this.mainWindow.loadFile('src/renderer/index.html');
+
+    this.mainWindow.once('ready-to-show', () => {
+      this.mainWindow.show();
+    });
+
+    this.mainWindow.on('close', (event) => {
+      if (!app.isQuiting) {
+        event.preventDefault();
+        this.mainWindow.hide();
+      }
+    });
+  }
+
+  setupTray() {
+    try {
+      const iconPath = path.join(__dirname, '../assets/tray-icon.png');
+      const fs = require('fs');
+      
+      if (!fs.existsSync(iconPath)) {
+        console.log('Tray icon not found, skipping tray setup');
+        return;
+      }
+
+      this.tray = new Tray(iconPath);
+      this.updateTrayMenu();
+      this.tray.setToolTip('CloseFlow Desktop');
+      
+      this.tray.on('click', () => {
+        this.mainWindow.isVisible() ? this.mainWindow.hide() : this.mainWindow.show();
+      });
+    } catch (error) {
+      console.log('Tray setup failed:', error.message);
+    }
+  }
+
+  updateTrayMenu() {
+    if (!this.tray) return;
+
+    try {
+      const menuTemplate = [
+        {
+          label: 'Show CloseFlow',
+          click: () => {
+            this.mainWindow.show();
+            this.mainWindow.focus();
+          }
+        },
+        {
+          label: this.isCallActive ? 'Call Analysis Active' : 'Start Call Analysis',
+          enabled: this.isZoomDetected && !this.isCallActive && this.isConnected && !this.isStartingCall,
+          click: () => this.startCallAnalysis()
+        },
+        { type: 'separator' },
+        {
+          label: 'Quit',
+          click: () => {
+            app.isQuiting = true;
+            app.quit();
+          }
+        }
+      ];
+
+      this.trayMenu = Menu.buildFromTemplate(menuTemplate);
+      this.tray.setContextMenu(this.trayMenu);
+    } catch (error) {
+      console.log('Error updating tray menu:', error.message);
+    }
+  }
+
+  setupIPC() {
+    ipcMain.handle('start-call-analysis', async () => {
+      try {
+        return await this.startCallAnalysis();
+      } catch (error) {
+        console.error('Error in start-call-analysis handler:', error);
+        throw error;
+      }
+    });
+
+    ipcMain.handle('stop-call-analysis', async () => {
+      try {
+        return await this.stopCallAnalysis();
+      } catch (error) {
+        console.error('Error in stop-call-analysis handler:', error);
+        throw error;
+      }
+    });
+
+    ipcMain.handle('select-input-device', async (event, deviceId) => {
+      try {
+        this.selectedDevices.input = deviceId;
+        await this.setupRealAudioMonitoring();
+        return true;
+      } catch (error) {
+        console.error('Error in select-input-device handler:', error);
+        throw error;
+      }
+    });
+
+    ipcMain.handle('select-output-device', async (event, deviceId) => {
+      try {
+        this.selectedDevices.output = deviceId;
+        return true;
+      } catch (error) {
+        console.error('Error in select-output-device handler:', error);
+        throw error;
+      }
+    });
+
+    ipcMain.handle('get-audio-devices', async () => {
+      try {
+        await this.loadAudioDevices();
+        return this.audioDevices;
+      } catch (error) {
+        console.error('Error in get-audio-devices handler:', error);
+        throw error;
+      }
+    });
+
+    ipcMain.handle('get-status', () => {
+      try {
+        return {
+          zoomDetected: this.isZoomDetected,
+          callActive: this.isCallActive,
+          selectedDevices: this.selectedDevices,
+          audioLevels: this.audioLevels,
+          webAppConnected: this.isConnected
+        };
+      } catch (error) {
+        console.error('Error in get-status handler:', error);
+        throw error;
+      }
+    });
+  }
+
+  async requestPermissions() {
+    try {
+      const micStatus = await systemPreferences.askForMediaAccess('microphone');
+      console.log('Microphone permission:', micStatus);
+
+      const screenStatus = systemPreferences.getMediaAccessStatus('screen');
+      console.log('Screen recording permission:', screenStatus);
+      
+      if (screenStatus !== 'granted') {
+        dialog.showMessageBox(this.mainWindow, {
+          type: 'info',
+          title: 'Screen Recording Permission Required',
+          message: 'CloseFlow needs screen recording permission to detect Zoom meetings. Please grant permission in System Preferences > Security & Privacy > Screen Recording.',
+          buttons: ['OK']
+        });
+      }
+    } catch (error) {
+      console.error('Error requesting permissions:', error);
+    }
+  }
+
+  startZoomDetection() {
+    this.zoomCheckInterval = setInterval(() => {
+      this.checkZoomStatus();
+    }, 3000);
+  }
+
+  checkZoomStatus() {
+    try {
+      let isZoomRunning = false;
+      let isInMeeting = false;
+
+      try {
+        const zoomProcesses = execSync('ps aux | grep -i zoom | grep -v grep', { encoding: 'utf8' });
+        isZoomRunning = zoomProcesses.includes('zoom.us') || zoomProcesses.includes('ZoomOpener') || zoomProcesses.includes('Zoom');
+        
+        console.log('Zoom running:', isZoomRunning);
+        
+        if (isZoomRunning) {
+          const script = `
+            tell application "System Events"
+              try
+                set zoomWindows to {}
+                repeat with proc in (every application process whose name contains "zoom")
+                  try
+                    set windowNames to name of every window of proc
+                    repeat with windowName in windowNames
+                      if windowName contains "Zoom Meeting" or windowName contains "zoom.us" or windowName contains "Meeting" then
+                        return true
+                      end if
+                    end repeat
+                  end try
+                end repeat
+                return false
+              on error
+                return false
+              end try
+            end tell
+          `;
+          
+          const result = execSync(`osascript -e '${script}'`, { encoding: 'utf8', timeout: 5000 }).trim();
+          isInMeeting = result === 'true';
+          
+          console.log('In meeting:', isInMeeting);
+        }
+      } catch (error) {
+        console.log('Error checking Zoom status:', error.message);
+        isInMeeting = false;
+      }
+
+      const wasDetected = this.isZoomDetected;
+      this.isZoomDetected = isInMeeting;
+
+      this.updateTrayMenu();
+
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send('zoom-status-changed', {
+          detected: this.isZoomDetected,
+          callActive: this.isCallActive
+        });
+      }
+
+      if (this.isZoomDetected && !wasDetected) {
+        this.showNotification('Zoom Meeting Detected', 'Ready to start call analysis');
+      }
+
+    } catch (error) {
+      console.error('Error in checkZoomStatus:', error);
+      this.isZoomDetected = false;
+    }
+  }
+
+  async loadAudioDevices() {
+    try {
+      let inputDevices = [];
+      let outputDevices = [];
+
+      // Get real audio devices using navigator.mediaDevices
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        try {
+          const devices = await this.mainWindow.webContents.executeJavaScript(`
+            (async () => {
+              try {
+                // Request permission first
+                await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                return {
+                  input: devices.filter(d => d.kind === 'audioinput').map(d => ({
+                    id: d.deviceId,
+                    name: d.label || 'Microphone ' + d.deviceId.slice(0, 8)
+                  })),
+                  output: devices.filter(d => d.kind === 'audiooutput').map(d => ({
+                    id: d.deviceId,
+                    name: d.label || 'Speaker ' + d.deviceId.slice(0, 8)
+                  }))
+                };
+              } catch (error) {
+                console.error('Error getting devices:', error);
+                return { input: [], output: [] };
+              }
+            })()
+          `);
+          
+          inputDevices = devices.input;
+          outputDevices = devices.output;
+          
+          console.log('Real audio devices loaded:', { inputDevices, outputDevices });
+        } catch (error) {
+          console.log('Could not get devices via webContents:', error.message);
+        }
+      }
+
+      // Fallback if no devices found
+      if (inputDevices.length === 0) {
+        inputDevices = [{ id: 'default-input', name: 'Built-in Microphone' }];
+      }
+
+      if (outputDevices.length === 0) {
+        outputDevices = [{ id: 'default-output', name: 'Built-in Speakers' }];
+      }
+
+      this.audioDevices = { input: inputDevices, output: outputDevices };
+
+      if (!this.selectedDevices.input && inputDevices.length > 0) {
+        this.selectedDevices.input = inputDevices[0].id;
+      }
+      if (!this.selectedDevices.output && outputDevices.length > 0) {
+        this.selectedDevices.output = outputDevices[0].id;
+      }
+
+      // Start audio monitoring after devices are loaded
+      await this.setupRealAudioMonitoring();
+
+    } catch (error) {
+      console.error('Error loading audio devices:', error);
+      this.audioDevices = {
+        input: [{ id: 'default-input', name: 'Built-in Microphone' }],
+        output: [{ id: 'default-output', name: 'Built-in Speakers' }]
+      };
+    }
+  }
+
+  async setupRealAudioMonitoring() {
+    try {
+      // Stop existing monitoring
+      if (this.audioMonitorInterval) {
+        clearInterval(this.audioMonitorInterval);
+      }
+
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        const success = await this.mainWindow.webContents.executeJavaScript(`
+          (async () => {
+            try {
+              // Clean up existing monitoring
+              if (window.closeFlowStream) {
+                window.closeFlowStream.getTracks().forEach(track => track.stop());
+              }
+              if (window.closeFlowAudioContext) {
+                await window.closeFlowAudioContext.close();
+              }
+
+              // Request microphone access
+              const stream = await navigator.mediaDevices.getUserMedia({ 
+                audio: { 
+                  deviceId: '${this.selectedDevices.input}',
+                  echoCancellation: false,
+                  noiseSuppression: false,
+                  autoGainControl: false
+                } 
+              });
+              
+              const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+              const analyser = audioContext.createAnalyser();
+              const microphone = audioContext.createMediaStreamSource(stream);
+              
+              analyser.fftSize = 256;
+              analyser.smoothingTimeConstant = 0.8;
+              microphone.connect(analyser);
+              
+              const dataArray = new Uint8Array(analyser.frequencyBinCount);
+              
+              // Store references globally for cleanup
+              window.closeFlowAudioContext = audioContext;
+              window.closeFlowAnalyser = analyser;
+              window.closeFlowStream = stream;
+              window.closeFlowDataArray = dataArray;
+              
+              console.log('Real audio monitoring setup complete');
+              return true;
+            } catch (error) {
+              console.error('Audio monitoring setup failed:', error);
+              return false;
+            }
+          })()
+        `);
+
+        if (success) {
+          console.log('✅ Real audio monitoring started');
+          this.startAudioLevelMonitoring();
+        } else {
+          console.log('⚠️ Falling back to simulated audio monitoring');
+          this.startSimulatedAudioMonitoring();
+        }
+      } else {
+        this.startSimulatedAudioMonitoring();
+      }
+    } catch (error) {
+      console.error('Error setting up real audio monitoring:', error);
+      this.startSimulatedAudioMonitoring();
+    }
+  }
+
+  startAudioLevelMonitoring() {
+    if (this.audioMonitorInterval) {
+      clearInterval(this.audioMonitorInterval);
+    }
+
+    this.audioMonitorInterval = setInterval(async () => {
+      try {
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+          const levels = await this.mainWindow.webContents.executeJavaScript(`
+            (() => {
+              try {
+                if (window.closeFlowAnalyser && window.closeFlowDataArray) {
+                  window.closeFlowAnalyser.getByteFrequencyData(window.closeFlowDataArray);
+                  const average = window.closeFlowDataArray.reduce((a, b) => a + b) / window.closeFlowDataArray.length;
+                  const level = Math.min((average / 255) * 100, 100);
+                  return {
+                    input: level,
+                    output: Math.random() * 30 + 10 // Simulated output for now
+                  };
+                }
+                return null;
+              } catch (error) {
+                console.error('Error getting audio levels:', error);
+                return null;
+              }
+            })()
+          `);
+
+          if (levels) {
+            this.audioLevels = levels;
+          } else {
+            // Fallback to simulation if real monitoring fails
+            this.audioLevels = {
+              input: Math.random() * 40 + 10,
+              output: Math.random() * 30 + 10
+            };
+          }
+
+          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send('audio-levels-updated', this.audioLevels);
+          }
+        }
+      } catch (error) {
+        console.error('Error in audio level monitoring:', error);
+      }
+    }, 100); // Update every 100ms for smooth animation
+  }
+
+  startSimulatedAudioMonitoring() {
+    if (this.audioMonitorInterval) {
+      clearInterval(this.audioMonitorInterval);
+    }
+
+    this.audioMonitorInterval = setInterval(() => {
+      // More realistic simulation based on whether we're in a call
+      if (this.isCallActive && this.isZoomDetected) {
+        // Simulate active conversation levels
+        this.audioLevels = {
+          input: Math.random() * 60 + 20, // 20-80%
+          output: Math.random() * 40 + 30  // 30-70%
+        };
+      } else {
+        // Simulate ambient/idle levels
+        this.audioLevels = {
+          input: Math.random() * 20 + 5,  // 5-25%
+          output: Math.random() * 15 + 5  // 5-20%
+        };
+      }
+
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send('audio-levels-updated', this.audioLevels);
+      }
+    }, 150);
+  }
+
+  startConnectionManagement() {
+    // Start ping to maintain connection
+    this.startPing();
+    
+    // Check connection status
+    this.connectionCheckInterval = setInterval(async () => {
+      await this.checkWebAppConnection();
+    }, 3000);
+    
+    // Start polling for messages from web app
+    this.startMessagePolling();
+    
+    // Initial check
+    this.checkWebAppConnection();
+  }
+
+  startPing() {
+    this.pingInterval = setInterval(async () => {
+      if (this.isConnected) {
+        try {
+          await this.sendPing();
+        } catch (error) {
+          console.log('❌ Ping failed:', error.message);
+          this.isConnected = false;
+          this.updateConnectionStatus('disconnected');
+          this.updateTrayMenu();
+        }
+      }
+    }, 5000); // Ping every 5 seconds
+  }
+
+  startMessagePolling() {
+    this.messagePollingInterval = setInterval(async () => {
+      if (this.isConnected) {
+        try {
+          await this.pollWebAppMessages();
+        } catch (error) {
+          console.error('Error polling messages:', error);
+        }
+      }
+    }, 1000); // Poll every 1 second for fast response
+  }
+
+  async pollWebAppMessages() {
+    try {
+      const response = await fetch(`${this.webAppUrl}/api/desktop-sync?action=get-messages`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(3000)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        
+        if (data.messages && data.messages.length > 0) {
+          for (const message of data.messages) {
+            this.handleWebAppMessage(message);
+          }
+        }
+      }
+    } catch (error) {
+      // Silently fail - connection check will handle disconnection
+    }
+  }
+
+  handleWebAppMessage(message) {
+    console.log('📨 Received message from web app:', message);
+    
+    switch (message.type) {
+      case 'web-app-call-started-confirmation':
+        console.log('✅ Web app confirmed call analysis started');
+        // CRITICAL: Only now set isCallActive to true
+        this.isCallActive = true;
+        this.isStartingCall = false;
+        this.updateTrayMenu();
+        
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+          this.mainWindow.webContents.send('zoom-status-changed', {
+            detected: this.isZoomDetected,
+            callActive: this.isCallActive
+          });
+        }
+        
+        this.showNotification('Analysis Started', 'Call analysis is now active. Check the web app for real-time insights.');
+        break;
+        
+      case 'web-app-call-stopped-confirmation':
+        console.log('✅ Web app confirmed call analysis stopped');
+        // CRITICAL: Only now set isCallActive to false
+        this.isCallActive = false;
+        this.isStoppingCall = false;
+        this.updateTrayMenu();
+        
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+          this.mainWindow.webContents.send('zoom-status-changed', {
+            detected: this.isZoomDetected,
+            callActive: this.isCallActive
+          });
+        }
+        
+        this.showNotification('Analysis Stopped', 'Call analysis has been stopped. Check the web app for the complete analysis.');
+        break;
+        
+      case 'insight-generated':
+        // Handle insights from web app
+        this.showNotification('New Insight', message.content || 'AI generated a new insight');
+        break;
+        
+      case 'call-status-update':
+        // Handle call status updates
+        console.log('📞 Call status update:', message.status);
+        break;
+        
+      default:
+        console.log('❓ Unknown message type from web app:', message.type);
+    }
+  }
+
+  async sendPing() {
+    const response = await fetch(`${this.webAppUrl}/api/desktop-sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        type: 'ping',
+        timestamp: Date.now()
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Ping failed: ${response.status}`);
+    }
+  }
+
+  async checkWebAppConnection() {
+    try {
+      const response = await fetch(`${this.webAppUrl}/api/desktop-sync?action=status`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(5000)
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const wasConnected = this.isConnected;
+        this.isConnected = true;
+        
+        if (!wasConnected) {
+          console.log('✅ Connected to CloseFlow web app');
+          this.updateConnectionStatus('connected');
+          this.updateTrayMenu();
+        }
+      } else {
+        throw new Error(`HTTP ${response.status}`);
+      }
+    } catch (error) {
+      const wasConnected = this.isConnected;
+      this.isConnected = false;
+      
+      if (wasConnected) {
+        console.log('❌ Lost connection to web app:', error.message);
+        this.updateConnectionStatus('disconnected');
+        this.updateTrayMenu();
+      }
+    }
+  }
+
+  updateConnectionStatus(status) {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('connection-status-changed', status);
+    }
+  }
+
+  async startCallAnalysis() {
+    if (!this.isZoomDetected) {
+      throw new Error('No Zoom meeting detected');
+    }
+
+    if (this.isCallActive || this.isStartingCall) {
+      throw new Error('Call analysis already active or starting');
+    }
+
+    if (!this.isConnected) {
+      throw new Error('Not connected to web app. Please ensure the web app is running.');
+    }
+
+    try {
+      this.isStartingCall = true;
+      this.updateTrayMenu();
+      
+      // Send message to web app via HTTP
+      const response = await fetch(`${this.webAppUrl}/api/desktop-sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'start-call-analysis',
+          deviceSettings: this.selectedDevices,
+          timestamp: Date.now()
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to start call analysis: ${response.status}`);
+      }
+
+      const result = await response.json();
+      
+      if (result.success) {
+        // CRITICAL: Do NOT set isCallActive here - wait for web app confirmation
+        console.log('✅ Call analysis request sent to web app');
+        this.showNotification('Starting Analysis', 'Waiting for web app to establish connection...');
+        
+        // Set a timeout in case we don't get confirmation
+        setTimeout(() => {
+          if (this.isStartingCall && !this.isCallActive) {
+            console.log('⚠️ Timeout waiting for web app confirmation');
+            this.isStartingCall = false;
+            this.updateTrayMenu();
+            this.showNotification('Start Failed', 'Web app did not confirm call start. Please try again.');
+          }
+        }, 15000); // 15 second timeout
+        
+        return { success: true };
+      } else {
+        throw new Error(result.message || 'Failed to start call analysis');
+      }
+    } catch (error) {
+      console.error('❌ Error starting call analysis:', error);
+      this.isStartingCall = false;
+      this.updateTrayMenu();
+      throw error;
+    }
+  }
+
+  async stopCallAnalysis() {
+    if (!this.isCallActive || this.isStoppingCall) {
+      throw new Error('Call analysis not active or already stopping');
+    }
+
+    try {
+      this.isStoppingCall = true;
+      this.updateTrayMenu();
+      
+      // Send message to web app via HTTP
+      const response = await fetch(`${this.webAppUrl}/api/desktop-sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'stop-call-analysis',
+          timestamp: Date.now()
+        })
+      });
+
+      if (response.ok) {
+        console.log('✅ Sent stop-call-analysis message to web app');
+      } else {
+        console.warn('⚠️ Failed to notify web app of call stop');
+      }
+
+      // CRITICAL: Do NOT set isCallActive here - wait for web app confirmation
+      this.showNotification('Stopping Analysis', 'Waiting for web app to confirm...');
+      
+      // Set a timeout in case we don't get confirmation
+      setTimeout(() => {
+        if (this.isStoppingCall && this.isCallActive) {
+          console.log('⚠️ Timeout waiting for web app stop confirmation');
+          this.isStoppingCall = false;
+          this.isCallActive = false;
+          this.updateTrayMenu();
+          this.showNotification('Stop Completed', 'Call analysis has been stopped.');
+        }
+      }, 10000); // 10 second timeout
+      
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error stopping call analysis:', error);
+      this.isStoppingCall = false;
+      this.updateTrayMenu();
+      throw error;
+    }
+  }
+
+  showNotification(title, body) {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('show-notification', { title, body });
+    }
+  }
+
+  cleanup() {
+    if (this.zoomCheckInterval) clearInterval(this.zoomCheckInterval);
+    if (this.audioMonitorInterval) clearInterval(this.audioMonitorInterval);
+    if (this.connectionCheckInterval) clearInterval(this.connectionCheckInterval);
+    if (this.messagePollingInterval) clearInterval(this.messagePollingInterval);
+    if (this.pingInterval) clearInterval(this.pingInterval);
+  }
+}
+
+// App event handlers
+app.whenReady().then(async () => {
+  try {
+    const closeFlowApp = new CloseFlowDesktop();
+    await closeFlowApp.initialize();
+    
+    // Store reference for cleanup
+    app.closeFlowApp = closeFlowApp;
+  } catch (error) {
+    console.error('Failed to initialize CloseFlow app:', error);
+  }
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    const closeFlowApp = new CloseFlowDesktop();
+    closeFlowApp.initialize().catch(console.error);
+  }
+});
+
+app.on('before-quit', () => {
+  app.isQuiting = true;
+  if (app.closeFlowApp) {
+    app.closeFlowApp.cleanup();
+  }
+});
