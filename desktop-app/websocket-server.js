@@ -5,6 +5,7 @@ class AudioWebSocketServer {
   constructor() {
     this.server = null;
     this.webAppConnection = null;
+    this.desktopConnection = null;
     this.deepgramConnection = null;
     this.audioStream = null;
     this.isRecording = false;
@@ -28,6 +29,7 @@ class AudioWebSocketServer {
         this.webAppConnection = ws;
         this.setupWebAppConnection(ws);
       } else {
+        this.desktopConnection = ws;
         this.setupDesktopConnection(ws);
       }
 
@@ -35,6 +37,8 @@ class AudioWebSocketServer {
         console.log(`📱 ${clientType} disconnected from WebSocket server`);
         if (clientType === 'web-app') {
           this.webAppConnection = null;
+        } else {
+          this.desktopConnection = null;
         }
         this.cleanup();
       });

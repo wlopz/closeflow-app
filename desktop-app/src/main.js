@@ -70,10 +70,11 @@ class CloseFlowDesktop {
   async createWindow() {
     this.mainWindow = new BrowserWindow({
       width: 400,
-      height: 700, // Increased height for new system audio section
+      height: 700,
       webPreferences: {
         nodeIntegration: true,
-        contextIsolation: false
+        contextIsolation: false,
+        enableRemoteModule: true
       },
       titleBarStyle: 'default',
       resizable: true,
@@ -82,6 +83,22 @@ class CloseFlowDesktop {
       frame: true,
       minimizable: true,
       maximizable: false
+    });
+
+    // Expose API for renderer to send audio data
+    this.mainWindow.webContents.on('did-finish-load', () => {
+      this.mainWindow.webContents.executeJavaScript(`
+        window.electronAPI = {
+          sendAudioData: (audioData) => {
+            // Convert Blob to ArrayBuffer and send via IPC
+            if (audioData instanceof Blob) {
+              audioData.arrayBuffer().then(buffer => {
+                require('electron').ipcRenderer.send('audio-data', buffer);
+              });
+            }
+          }
+        };
+      `);
     });
 
     this.mainWindow.loadFile('src/renderer/index.html');
@@ -155,6 +172,13 @@ class CloseFlowDesktop {
   }
 
   setupIPC() {
+    // Handle audio data from renderer process
+    ipcMain.on('audio-data', (event, audioBuffer) => {
+      if (this.systemAudioCapture) {
+        this.systemAudioCapture.handleAudioData(Buffer.from(audioBuffer));
+      }
+    });
+
     ipcMain.handle('start-call-analysis', async (event, options = {}) => {
       try {
         const { inputDeviceId, outputDeviceId, systemAudioSourceId } = options;
@@ -839,8 +863,8 @@ class CloseFlowDesktop {
         });
       }
       
-      // Initialize system audio capture
-      const captureInitialized = await this.systemAudioCapture.initialize(this.selectedSystemAudioSource);
+      // Initialize system audio capture with main window reference
+      const captureInitialized = await this.systemAudioCapture.initialize(this.selectedSystemAudioSource, this.mainWindow);
       if (!captureInitialized) {
         throw new Error('Failed to initialize system audio capture');
       }
