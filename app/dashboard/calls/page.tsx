@@ -41,7 +41,7 @@ export default function CallsPage() {
     return () => clearInterval(timer);
   }, [actualCallActive]);
 
-  // Check desktop connection status
+  // Check desktop connection status and poll for call status
   useEffect(() => {
     const checkDesktopStatus = async () => {
       try {
@@ -49,19 +49,34 @@ export default function CallsPage() {
         const data = await response.json();
         setDesktopConnected(data.connected);
         
+        // CRITICAL: Update desktop call status from the desktop app's status
+        setIsDesktopCallActive(data.callActive || false);
+        
         console.log('📊 Desktop status:', {
           connected: data.connected,
           callActive: data.callActive,
           pendingMessages: data.pendingMessages
         });
+        
+        // Check for pending messages from desktop
+        if (data.connected && data.pendingMessages > 0) {
+          const messagesResponse = await fetch('/api/desktop-sync?action=get-messages');
+          const messagesData = await messagesResponse.json();
+          
+          // Process any pending messages (though the main status polling should handle most cases)
+          for (const message of messagesData.messages) {
+            console.log('📨 Processing pending message:', message);
+          }
+        }
       } catch (error) {
         console.error('Error checking desktop status:', error);
         setDesktopConnected(false);
+        setIsDesktopCallActive(false);
       }
     };
 
     checkDesktopStatus();
-    const interval = setInterval(checkDesktopStatus, 3000);
+    const interval = setInterval(checkDesktopStatus, 2000); // Check every 2 seconds for fast response
     return () => clearInterval(interval);
   }, []);
   
@@ -86,16 +101,6 @@ export default function CallsPage() {
     setElapsedTime(0);
     // Trigger refresh of call history
     setRefreshTrigger(prev => prev + 1);
-  };
-
-  // Callback to handle desktop call status changes
-  const handleDesktopCallStatusChange = (active: boolean) => {
-    console.log('📱 Desktop call status changed:', active);
-    setIsDesktopCallActive(active);
-    
-    if (active) {
-      setElapsedTime(0);
-    }
   };
   
   return (
@@ -180,7 +185,6 @@ export default function CallsPage() {
             {actualCallActive ? (
               <CallAnalyzer 
                 onCallEnd={handleCallEnd}
-                onDesktopCallStatusChange={handleDesktopCallStatusChange}
               />
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-center p-8">

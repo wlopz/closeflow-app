@@ -47,10 +47,9 @@ const SPEAKER_COLORS = [
 
 interface CallAnalyzerProps {
   onCallEnd?: () => void;
-  onDesktopCallStatusChange?: (active: boolean) => void;
 }
 
-export function CallAnalyzer({ onCallEnd, onDesktopCallStatusChange }: CallAnalyzerProps) {
+export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
   const [live, setLive] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -117,12 +116,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStatusChange }: CallAnaly
         if (!live && !connecting) {
           setDesktopTriggered(true);
           
-          // CRITICAL: Notify parent component FIRST to update UI state
-          if (onDesktopCallStatusChange) {
-            onDesktopCallStatusChange(true);
-          }
-          
-          // Then start the live analysis
+          // Start the live analysis immediately
           await startLive(true);
         }
         break;
@@ -130,10 +124,6 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStatusChange }: CallAnaly
         console.log('🛑 Desktop triggered call stop');
         if (live) {
           stopLive();
-          // Notify parent component
-          if (onDesktopCallStatusChange) {
-            onDesktopCallStatusChange(false);
-          }
         }
         break;
       case 'insight-generated':
@@ -633,11 +623,6 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStatusChange }: CallAnaly
     // Show feedback modal if we have a call session
     if (currentCallId) {
       setShowFeedbackModal(true);
-    }
-    
-    // Notify parent component that desktop call has ended
-    if (desktopTriggered && onDesktopCallStatusChange) {
-      onDesktopCallStatusChange(false);
     }
   };
 
