@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, Menu, Tray, dialog, systemPreferences, desktopCapturer } = require('electron');
 const path = require('path');
 const { execSync, spawn } = require('child_process');
+const SystemAudioCapture = require('./audio-capture');
 
 class CloseFlowDesktop {
   constructor() {
@@ -11,6 +12,7 @@ class CloseFlowDesktop {
     this.isCallActive = false;
     this.zoomCheckInterval = null;
     this.audioDevices = { input: [], output: [] };
+    this.systemAudioSources = [];
     this.selectedDevices = { input: null, output: null };
     this.selectedSystemAudioSource = null;
     this.audioLevels = { input: 0, output: 0, systemAudio: 0 };
@@ -22,6 +24,8 @@ class CloseFlowDesktop {
     this.pingInterval = null;
     this.isStartingCall = false;
     this.isStoppingCall = false;
+    this.systemAudioCapture = new SystemAudioCapture();
+    this.websocketServer = null;
   }
 
   async initialize() {
@@ -31,9 +35,36 @@ class CloseFlowDesktop {
     this.startZoomDetection();
     await this.requestPermissions();
     await this.loadAudioDevices();
+    await this.loadSystemAudioSources();
+    
+    // Start WebSocket server
+    this.startWebSocketServer();
     
     // Start connection management
     this.startConnectionManagement();
+  }
+
+  startWebSocketServer() {
+    try {
+      // Start the WebSocket server as a child process
+      const serverPath = path.join(__dirname, '../websocket-server.js');
+      this.websocketServer = spawn('node', [serverPath], {
+        stdio: 'inherit'
+      });
+
+      this.websocketServer.on('error', (error) => {
+        console.error('❌ WebSocket server error:', error);
+      });
+
+      this.websocketServer.on('exit', (code) => {
+        console.log(`📡 WebSocket server exited with code ${code}`);
+        this.websocketServer = null;
+      });
+
+      console.log('✅ WebSocket server started');
+    } catch (error) {
+      console.error('❌ Failed to start WebSocket server:', error);
+    }
   }
 
   async createWindow() {
@@ -221,6 +252,7 @@ class CloseFlowDesktop {
           console.log(`  - ${source.type}: ${source.name} (${source.id})`);
         });
 
+        this.systemAudioSources = audioSources;
         return audioSources;
       } catch (error) {
         console.error('Error getting desktop audio sources:', error);
@@ -265,6 +297,45 @@ class CloseFlowDesktop {
       }
     } catch (error) {
       console.error('Error requesting permissions:', error);
+    }
+  }
+
+  async loadSystemAudioSources() {
+    try {
+      this.systemAudioSources = await this.getDesktopAudioSources();
+      
+      // Auto-select first source if none selected
+      if (!this.selectedSystemAudioSource && this.systemAudioSources.length > 0) {
+        this.selectedSystemAudioSource = this.systemAudioSources[0].id;
+      }
+    } catch (error) {
+      console.error('Error loading system audio sources:', error);
+    }
+  }
+
+  async getDesktopAudioSources() {
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ['window', 'screen'],
+        fetchWindowIcons: false
+      });
+
+      return sources
+        .filter(source => {
+          return source.id.startsWith('screen:') || 
+                 source.name.toLowerCase().includes('zoom') ||
+                 source.name.toLowerCase().includes('audio') ||
+                 source.name.toLowerCase().includes('system') ||
+                 source.id.startsWith('window:');
+        })
+        .map(source => ({
+          id: source.id,
+          name: source.name,
+          type: source.id.startsWith('screen:') ? 'screen' : 'window'
+        }));
+    } catch (error) {
+      console.error('Error getting desktop audio sources:', error);
+      return [];
     }
   }
 
@@ -750,6 +821,10 @@ class CloseFlowDesktop {
       throw new Error('Not connected to web app. Please ensure the web app is running.');
     }
 
+    if (!this.selectedSystemAudioSource) {
+      throw new Error('No system audio source selected. Please select a system audio source.');
+    }
+
     try {
       this.isStartingCall = true;
       this.updateTrayMenu();
@@ -764,6 +839,18 @@ class CloseFlowDesktop {
         });
       }
       
+      // Initialize system audio capture
+      const captureInitialized = await this.systemAudioCapture.initialize(this.selectedSystemAudioSource);
+      if (!captureInitialized) {
+        throw new Error('Failed to initialize system audio capture');
+      }
+
+      // Start system audio capture
+      const captureStarted = await this.systemAudioCapture.startCapture();
+      if (!captureStarted) {
+        throw new Error('Failed to start system audio capture');
+      }
+
       // Send message to web app via HTTP
       const response = await fetch(`${this.webAppUrl}/api/desktop-sync`, {
         method: 'POST',
@@ -810,6 +897,9 @@ class CloseFlowDesktop {
             }
             
             this.showNotification('Start Failed', 'Web app did not confirm call start. Please try again.');
+            
+            // Stop system audio capture on timeout
+            this.systemAudioCapture.stopCapture();
           }
         }, 15000); // 15 second timeout
         
@@ -831,6 +921,9 @@ class CloseFlowDesktop {
           isStoppingCall: this.isStoppingCall
         });
       }
+      
+      // Stop system audio capture on error
+      this.systemAudioCapture.stopCapture();
       
       throw error;
     }
@@ -854,6 +947,9 @@ class CloseFlowDesktop {
           isStoppingCall: this.isStoppingCall
         });
       }
+      
+      // Stop system audio capture
+      this.systemAudioCapture.stopCapture();
       
       // Send message to web app via HTTP
       const response = await fetch(`${this.webAppUrl}/api/desktop-sync`, {
@@ -930,6 +1026,17 @@ class CloseFlowDesktop {
     if (this.connectionCheckInterval) clearInterval(this.connectionCheckInterval);
     if (this.messagePollingInterval) clearInterval(this.messagePollingInterval);
     if (this.pingInterval) clearInterval(this.pingInterval);
+    
+    // Stop system audio capture
+    if (this.systemAudioCapture) {
+      this.systemAudioCapture.destroy();
+    }
+    
+    // Stop WebSocket server
+    if (this.websocketServer) {
+      this.websocketServer.kill();
+      this.websocketServer = null;
+    }
   }
 }
 

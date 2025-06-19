@@ -200,7 +200,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     currentSegmentStartTime.current = 0;
   };
 
-  // Handle new transcript from Deepgram
+  // Handle new transcript from WebSocket server (which gets it from Deepgram)
   const handleTranscript = (transcript: string, isFinal: boolean, deepgramSpeaker?: number) => {
     if (!transcript || transcript.trim() === '') return;
     
@@ -411,7 +411,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     }
   };
 
-  // Connect to Deepgram
+  // Connect to local WebSocket server instead of Deepgram directly
   async function connectWithRetry() {
     const token = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
     if (!token) {
@@ -432,22 +432,13 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     setCallStartTime(Date.now());
 
     try {
-      const dgUrl = new URL('wss://api.deepgram.com/v1/listen');
-      dgUrl.searchParams.set('model', 'nova-2');
-      dgUrl.searchParams.set('language', 'en-US');
-      dgUrl.searchParams.set('interim_results', 'true');
-      dgUrl.searchParams.set('punctuate', 'true');
-      dgUrl.searchParams.set('smart_format', 'true');
-      dgUrl.searchParams.set('diarize', 'true');
-      dgUrl.searchParams.set('utterances', 'true');
-      dgUrl.searchParams.set('endpointing', '1000'); // Increased from 300 to 1000 for better coherent segments
-
-      const ws = new WebSocket(dgUrl.toString(), ['token', token]);
+      // Connect to local WebSocket server instead of Deepgram directly
+      const ws = new WebSocket('ws://localhost:8080/web-app');
       socketRef.current = ws;
       setConnecting(true);
 
       ws.onopen = async () => {
-        console.log('✅ Connected to Deepgram');
+        console.log('✅ Connected to local WebSocket server');
         setLive(true);
         setConnecting(false);
         setMessages([]);
@@ -459,6 +450,12 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         clearSilenceTimer();
         clearLongSpeechTimer();
         currentSegmentStartTime.current = 0;
+        
+        // Send Deepgram API key to WebSocket server to start transcription
+        ws.send(JSON.stringify({
+          type: 'start-transcription',
+          deepgramApiKey: token
+        }));
         
         // CRITICAL: Send confirmation to desktop app that call analysis is truly active
         try {
@@ -474,10 +471,6 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         } catch (error) {
           console.error('Error sending confirmation to desktop:', error);
         }
-        
-        if (recorderRef.current) {
-          recorderRef.current.start(250);
-        }
       };
 
       ws.onerror = () => {
@@ -489,36 +482,49 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         try {
           const msg = JSON.parse(evt.data);
           
-          if (msg.type === 'Results' && msg.channel?.alternatives?.[0]?.transcript) {
-            const transcript = msg.channel.alternatives[0].transcript;
-            const isFinal = msg.is_final || false;
+          if (msg.type === 'deepgram-result' && msg.data) {
+            const deepgramResult = msg.data;
             
-            // Try to get speaker from words array
-            let speakerId = undefined;
-            const words = msg.channel.alternatives[0].words;
-            if (words && words.length > 0) {
-              const speakerCounts = new Map();
-              words.forEach((word: any) => {
-                if (word.speaker !== undefined) {
-                  speakerCounts.set(word.speaker, (speakerCounts.get(word.speaker) || 0) + 1);
-                }
-              });
+            if (deepgramResult.type === 'Results' && deepgramResult.channel?.alternatives?.[0]?.transcript) {
+              const transcript = deepgramResult.channel.alternatives[0].transcript;
+              const isFinal = deepgramResult.is_final || false;
               
-              if (speakerCounts.size > 0) {
-                let maxCount = 0;
-                for (const [speaker, count] of speakerCounts.entries()) {
-                  if (count > maxCount) {
-                    maxCount = count;
-                    speakerId = speaker;
+              // Try to get speaker from words array
+              let speakerId = undefined;
+              const words = deepgramResult.channel.alternatives[0].words;
+              if (words && words.length > 0) {
+                const speakerCounts = new Map();
+                words.forEach((word: any) => {
+                  if (word.speaker !== undefined) {
+                    speakerCounts.set(word.speaker, (speakerCounts.get(word.speaker) || 0) + 1);
+                  }
+                });
+                
+                if (speakerCounts.size > 0) {
+                  let maxCount = 0;
+                  for (const [speaker, count] of speakerCounts.entries()) {
+                    if (count > maxCount) {
+                      maxCount = count;
+                      speakerId = speaker;
+                    }
                   }
                 }
               }
+              
+              handleTranscript(transcript, isFinal, speakerId);
             }
-            
-            handleTranscript(transcript, isFinal, speakerId);
+          } else if (msg.type === 'deepgram-connected') {
+            console.log('✅ WebSocket server connected to Deepgram');
+          } else if (msg.type === 'deepgram-error') {
+            console.error('❌ Deepgram error via WebSocket:', msg.error);
+            toast({
+              variant: 'destructive',
+              title: 'Transcription Error',
+              description: 'Failed to connect to transcription service.'
+            });
           }
         } catch (error) {
-          console.error('Error parsing message:', error);
+          console.error('Error parsing WebSocket message:', error);
         }
       };
 
@@ -566,36 +572,41 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     console.log('🎯 Starting live call analysis, triggered by desktop:', triggeredByDesktop);
     setDesktopTriggered(triggeredByDesktop);
     
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: { 
-          channelCount: 1, 
-          sampleRate: 16000,
-          echoCancellation: true,
-          noiseSuppression: true
-        } 
-      });
+    // For desktop-triggered calls, we don't need microphone access
+    // The desktop app will handle audio capture via system audio
+    if (!triggeredByDesktop) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: { 
+            channelCount: 1, 
+            sampleRate: 16000,
+            echoCancellation: true,
+            noiseSuppression: true
+          } 
+        });
 
-      const recorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus',
-      });
-      recorderRef.current = recorder;
+        const recorder = new MediaRecorder(stream, {
+          mimeType: 'audio/webm;codecs=opus',
+        });
+        recorderRef.current = recorder;
 
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0 && socketRef.current?.readyState === WebSocket.OPEN) {
-          socketRef.current.send(e.data);
-        }
-      };
-
-      await connectWithRetry();
-    } catch (err) {
-      console.error('Failed to start recording:', err);
-      toast({
-        variant: 'destructive',
-        title: 'Microphone error',
-        description: 'Please check your microphone permissions'
-      });
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0 && socketRef.current?.readyState === WebSocket.OPEN) {
+            socketRef.current.send(e.data);
+          }
+        };
+      } catch (err) {
+        console.error('Failed to start recording:', err);
+        toast({
+          variant: 'destructive',
+          title: 'Microphone error',
+          description: 'Please check your microphone permissions'
+        });
+        return;
+      }
     }
+
+    await connectWithRetry();
   };
 
   const stopLive = async () => {
@@ -613,6 +624,8 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     
     const ws = socketRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
+      // Tell WebSocket server to stop transcription
+      ws.send(JSON.stringify({ type: 'stop-transcription' }));
       ws.close();
     }
     socketRef.current = undefined;
