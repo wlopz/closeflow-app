@@ -34,6 +34,9 @@ class CloseFlowDesktop {
     
     // Add flag to track if renderer is ready
     this.rendererReady = false;
+    
+    // Add debug mode flag
+    this.debugMode = true;
   }
 
   async initialize() {
@@ -132,23 +135,52 @@ class CloseFlowDesktop {
       this.mainWindow.webContents.executeJavaScript(`
         window.electronAPI = {
           sendAudioData: (audioData) => {
-            // FIXED: Send Uint8Array directly instead of converting to array
+            console.log('🎤 [RENDERER DEBUG] Received audioData:', {
+              type: typeof audioData,
+              isBlob: audioData instanceof Blob,
+              size: audioData instanceof Blob ? audioData.size : 'N/A'
+            });
+            
+            // DEBUGGING: Send simplified message instead of actual audio data
             if (audioData instanceof Blob) {
               const reader = new FileReader();
               reader.onload = function() {
                 const { ipcRenderer } = require('electron');
-                // Send as Uint8Array buffer which is properly serializable
                 const uint8Array = new Uint8Array(reader.result);
-                ipcRenderer.send('audio-data', uint8Array);
+                
+                console.log('🎤 [RENDERER DEBUG] Prepared uint8Array:', {
+                  type: typeof uint8Array,
+                  constructor: uint8Array.constructor.name,
+                  byteLength: uint8Array.byteLength,
+                  isUint8Array: uint8Array instanceof Uint8Array,
+                  first10Bytes: Array.from(uint8Array.slice(0, 10))
+                });
+                
+                // TEMPORARY DEBUG: Send simplified message instead of binary data
+                const debugMessage = {
+                  size: uint8Array.byteLength,
+                  type: typeof uint8Array,
+                  constructor: uint8Array.constructor.name,
+                  isUint8Array: uint8Array instanceof Uint8Array,
+                  timestamp: Date.now()
+                };
+                
+                console.log('🎤 [RENDERER DEBUG] Sending debug message:', debugMessage);
+                ipcRenderer.send('audio-data', debugMessage);
+                
+                // TODO: Uncomment this line once debugging is complete
+                // ipcRenderer.send('audio-data', uint8Array);
               };
               reader.onerror = function(err) {
-                console.error('Error reading audio blob:', err);
+                console.error('❌ [RENDERER DEBUG] Error reading audio blob:', err);
               };
               reader.readAsArrayBuffer(audioData);
+            } else {
+              console.warn('⚠️ [RENDERER DEBUG] audioData is not a Blob:', typeof audioData);
             }
           }
         };
-        console.log('✅ Electron API exposed to renderer');
+        console.log('✅ Electron API exposed to renderer with debug logging');
       `).catch(err => {
         console.error('Error setting up renderer API:', err);
         this.rendererReady = false;
@@ -213,9 +245,26 @@ class CloseFlowDesktop {
   }
 
   setupIPC() {
-    // Handle audio data from renderer process - FIXED: Proper Uint8Array handling
+    // Handle audio data from renderer process - DEBUGGING VERSION
     ipcMain.on('audio-data', (event, audioData) => {
       try {
+        console.log('🎤 [MAIN DEBUG] Received audio data:', {
+          type: typeof audioData,
+          constructor: audioData?.constructor?.name,
+          isObject: typeof audioData === 'object',
+          keys: typeof audioData === 'object' ? Object.keys(audioData) : 'N/A'
+        });
+
+        // TEMPORARY DEBUG: Handle simplified message
+        if (typeof audioData === 'object' && audioData.size !== undefined) {
+          console.log('✅ [MAIN DEBUG] Successfully received debug message:', audioData);
+          
+          // TODO: Remove this debug handling and uncomment the real audio processing below
+          return;
+        }
+
+        // REAL AUDIO PROCESSING (currently disabled for debugging)
+        /*
         if (this.systemAudioCapture) {
           // Check if it's a Uint8Array or regular array
           let audioBuffer;
@@ -230,8 +279,9 @@ class CloseFlowDesktop {
           
           this.systemAudioCapture.handleAudioData(audioBuffer);
         }
+        */
       } catch (error) {
-        console.error('Error handling audio data:', error);
+        console.error('❌ [MAIN DEBUG] Error handling audio data:', error);
         // Don't crash the app, just log the error
       }
     });
