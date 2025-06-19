@@ -49,8 +49,8 @@ class SystemAudioCapture {
       return false;
     }
 
-    if (!this.mainWindow) {
-      console.error('❌ No main window reference');
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) {
+      console.error('❌ No main window reference or window destroyed');
       return false;
     }
 
@@ -67,6 +67,13 @@ class SystemAudioCapture {
             if (window.closeFlowSystemStream) {
               window.closeFlowSystemStream.getTracks().forEach(track => track.stop());
               window.closeFlowSystemStream = null;
+            }
+
+            if (window.closeFlowMediaRecorder) {
+              if (window.closeFlowMediaRecorder.state !== 'inactive') {
+                window.closeFlowMediaRecorder.stop();
+              }
+              window.closeFlowMediaRecorder = null;
             }
 
             // Get the audio stream from the selected source using desktopCapturer
@@ -92,9 +99,9 @@ class SystemAudioCapture {
 
             // Set up data handling
             mediaRecorder.ondataavailable = (event) => {
-              if (event.data.size > 0) {
+              if (event.data.size > 0 && window.electronAPI?.sendAudioData) {
                 // Send audio data via IPC to main process
-                window.electronAPI?.sendAudioData?.(event.data);
+                window.electronAPI.sendAudioData(event.data);
               }
             };
 
@@ -165,7 +172,10 @@ class SystemAudioCapture {
             console.error('Error stopping audio capture:', error);
           }
         })()
-      `);
+      `).catch(err => {
+        // Ignore errors during shutdown
+        console.log('Note: Error stopping audio capture (likely during shutdown):', err.message);
+      });
     }
 
     // Notify WebSocket server that audio capture stopped

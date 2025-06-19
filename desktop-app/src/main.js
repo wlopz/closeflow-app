@@ -26,6 +26,7 @@ class CloseFlowDesktop {
     this.isStoppingCall = false;
     this.systemAudioCapture = new SystemAudioCapture();
     this.websocketServer = null;
+    this.isShuttingDown = false;
   }
 
   async initialize() {
@@ -85,26 +86,11 @@ class CloseFlowDesktop {
       maximizable: false
     });
 
-    // Expose API for renderer to send audio data
-    this.mainWindow.webContents.on('did-finish-load', () => {
-      this.mainWindow.webContents.executeJavaScript(`
-        window.electronAPI = {
-          sendAudioData: (audioData) => {
-            // Convert Blob to ArrayBuffer and send via IPC
-            if (audioData instanceof Blob) {
-              audioData.arrayBuffer().then(buffer => {
-                require('electron').ipcRenderer.send('audio-data', buffer);
-              });
-            }
-          }
-        };
-      `);
-    });
-
     this.mainWindow.loadFile('src/renderer/index.html');
 
     this.mainWindow.once('ready-to-show', () => {
       this.mainWindow.show();
+      this.setupRendererAPI();
     });
 
     this.mainWindow.on('close', (event) => {
@@ -113,6 +99,36 @@ class CloseFlowDesktop {
         this.mainWindow.hide();
       }
     });
+
+    this.mainWindow.on('closed', () => {
+      this.isShuttingDown = true;
+      this.cleanup();
+    });
+  }
+
+  setupRendererAPI() {
+    // Wait for renderer to be ready, then expose API
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.executeJavaScript(`
+        window.electronAPI = {
+          sendAudioData: (audioData) => {
+            // Convert Blob to ArrayBuffer and send via IPC
+            if (audioData instanceof Blob) {
+              audioData.arrayBuffer().then(buffer => {
+                const { ipcRenderer } = require('electron');
+                // Send as Buffer to avoid cloning issues
+                ipcRenderer.send('audio-data', Array.from(new Uint8Array(buffer)));
+              }).catch(err => {
+                console.error('Error converting audio data:', err);
+              });
+            }
+          }
+        };
+        console.log('✅ Electron API exposed to renderer');
+      `).catch(err => {
+        console.error('Error setting up renderer API:', err);
+      });
+    }
   }
 
   setupTray() {
@@ -173,9 +189,14 @@ class CloseFlowDesktop {
 
   setupIPC() {
     // Handle audio data from renderer process
-    ipcMain.on('audio-data', (event, audioBuffer) => {
-      if (this.systemAudioCapture) {
-        this.systemAudioCapture.handleAudioData(Buffer.from(audioBuffer));
+    ipcMain.on('audio-data', (event, audioArray) => {
+      try {
+        if (this.systemAudioCapture && Array.isArray(audioArray)) {
+          const audioBuffer = Buffer.from(audioArray);
+          this.systemAudioCapture.handleAudioData(audioBuffer);
+        }
+      } catch (error) {
+        console.error('Error handling audio data:', error);
       }
     });
 
@@ -365,7 +386,9 @@ class CloseFlowDesktop {
 
   startZoomDetection() {
     this.zoomCheckInterval = setInterval(() => {
-      this.checkZoomStatus();
+      if (!this.isShuttingDown) {
+        this.checkZoomStatus();
+      }
     }, 3000);
   }
 
@@ -417,14 +440,13 @@ class CloseFlowDesktop {
 
       this.updateTrayMenu();
 
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        this.mainWindow.webContents.send('zoom-status-changed', {
-          detected: this.isZoomDetected,
-          callActive: this.isCallActive,
-          isStartingCall: this.isStartingCall,
-          isStoppingCall: this.isStoppingCall
-        });
-      }
+      // Safely send to renderer
+      this.sendToRenderer('zoom-status-changed', {
+        detected: this.isZoomDetected,
+        callActive: this.isCallActive,
+        isStartingCall: this.isStartingCall,
+        isStoppingCall: this.isStoppingCall
+      });
 
       if (this.isZoomDetected && !wasDetected) {
         this.showNotification('Zoom Meeting Detected', 'Ready to start call analysis');
@@ -436,6 +458,35 @@ class CloseFlowDesktop {
     }
   }
 
+  // Safe method to send messages to renderer
+  sendToRenderer(channel, data) {
+    try {
+      if (this.mainWindow && !this.mainWindow.isDestroyed() && !this.isShuttingDown) {
+        this.mainWindow.webContents.send(channel, data);
+      }
+    } catch (error) {
+      // Silently ignore renderer communication errors during shutdown
+      if (!this.isShuttingDown) {
+        console.error(`Error sending to renderer (${channel}):`, error.message);
+      }
+    }
+  }
+
+  // Safe method to execute JavaScript in renderer
+  async executeInRenderer(script) {
+    try {
+      if (this.mainWindow && !this.mainWindow.isDestroyed() && !this.isShuttingDown) {
+        return await this.mainWindow.webContents.executeJavaScript(script);
+      }
+      return null;
+    } catch (error) {
+      if (!this.isShuttingDown) {
+        console.error('Error executing in renderer:', error.message);
+      }
+      return null;
+    }
+  }
+
   async loadAudioDevices() {
     try {
       let inputDevices = [];
@@ -444,7 +495,7 @@ class CloseFlowDesktop {
       // Get real audio devices using navigator.mediaDevices
       if (this.mainWindow && !this.mainWindow.isDestroyed()) {
         try {
-          const devices = await this.mainWindow.webContents.executeJavaScript(`
+          const devices = await this.executeInRenderer(`
             (async () => {
               try {
                 // Request permission first
@@ -468,10 +519,11 @@ class CloseFlowDesktop {
             })()
           `);
           
-          inputDevices = devices.input;
-          outputDevices = devices.output;
-          
-          console.log('Real audio devices loaded:', { inputDevices, outputDevices });
+          if (devices) {
+            inputDevices = devices.input;
+            outputDevices = devices.output;
+            console.log('Real audio devices loaded:', { inputDevices, outputDevices });
+          }
         } catch (error) {
           console.log('Could not get devices via webContents:', error.message);
         }
@@ -514,61 +566,57 @@ class CloseFlowDesktop {
         clearInterval(this.audioMonitorInterval);
       }
 
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        const success = await this.mainWindow.webContents.executeJavaScript(`
-          (async () => {
-            try {
-              // Clean up existing monitoring
-              if (window.closeFlowStream) {
-                window.closeFlowStream.getTracks().forEach(track => track.stop());
-              }
-              if (window.closeFlowAudioContext) {
-                await window.closeFlowAudioContext.close();
-              }
-
-              // Request microphone access
-              const stream = await navigator.mediaDevices.getUserMedia({ 
-                audio: { 
-                  deviceId: '${this.selectedDevices.input}',
-                  echoCancellation: false,
-                  noiseSuppression: false,
-                  autoGainControl: false
-                } 
-              });
-              
-              const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-              const analyser = audioContext.createAnalyser();
-              const microphone = audioContext.createMediaStreamSource(stream);
-              
-              analyser.fftSize = 256;
-              analyser.smoothingTimeConstant = 0.8;
-              microphone.connect(analyser);
-              
-              const dataArray = new Uint8Array(analyser.frequencyBinCount);
-              
-              // Store references globally for cleanup
-              window.closeFlowAudioContext = audioContext;
-              window.closeFlowAnalyser = analyser;
-              window.closeFlowStream = stream;
-              window.closeFlowDataArray = dataArray;
-              
-              console.log('Real audio monitoring setup complete');
-              return true;
-            } catch (error) {
-              console.error('Audio monitoring setup failed:', error);
-              return false;
+      const success = await this.executeInRenderer(`
+        (async () => {
+          try {
+            // Clean up existing monitoring
+            if (window.closeFlowStream) {
+              window.closeFlowStream.getTracks().forEach(track => track.stop());
             }
-          })()
-        `);
+            if (window.closeFlowAudioContext) {
+              await window.closeFlowAudioContext.close();
+            }
 
-        if (success) {
-          console.log('✅ Real audio monitoring started');
-          this.startAudioLevelMonitoring();
-        } else {
-          console.log('⚠️ Falling back to simulated audio monitoring');
-          this.startSimulatedAudioMonitoring();
-        }
+            // Request microphone access
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+              audio: { 
+                deviceId: '${this.selectedDevices.input}',
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false
+              } 
+            });
+            
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const analyser = audioContext.createAnalyser();
+            const microphone = audioContext.createMediaStreamSource(stream);
+            
+            analyser.fftSize = 256;
+            analyser.smoothingTimeConstant = 0.8;
+            microphone.connect(analyser);
+            
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            
+            // Store references globally for cleanup
+            window.closeFlowAudioContext = audioContext;
+            window.closeFlowAnalyser = analyser;
+            window.closeFlowStream = stream;
+            window.closeFlowDataArray = dataArray;
+            
+            console.log('Real audio monitoring setup complete');
+            return true;
+          } catch (error) {
+            console.error('Audio monitoring setup failed:', error);
+            return false;
+          }
+        })()
+      `);
+
+      if (success) {
+        console.log('✅ Real audio monitoring started');
+        this.startAudioLevelMonitoring();
       } else {
+        console.log('⚠️ Falling back to simulated audio monitoring');
         this.startSimulatedAudioMonitoring();
       }
     } catch (error) {
@@ -583,46 +631,46 @@ class CloseFlowDesktop {
     }
 
     this.audioMonitorInterval = setInterval(async () => {
+      if (this.isShuttingDown) return;
+
       try {
-        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-          const levels = await this.mainWindow.webContents.executeJavaScript(`
-            (() => {
-              try {
-                if (window.closeFlowAnalyser && window.closeFlowDataArray) {
-                  window.closeFlowAnalyser.getByteFrequencyData(window.closeFlowDataArray);
-                  const average = window.closeFlowDataArray.reduce((a, b) => a + b) / window.closeFlowDataArray.length;
-                  const level = Math.min((average / 255) * 100, 100);
-                  return {
-                    input: level,
-                    output: Math.random() * 30 + 10, // Simulated output for now
-                    systemAudio: Math.random() * 40 + 15 // Simulated system audio for now
-                  };
-                }
-                return null;
-              } catch (error) {
-                console.error('Error getting audio levels:', error);
-                return null;
+        const levels = await this.executeInRenderer(`
+          (() => {
+            try {
+              if (window.closeFlowAnalyser && window.closeFlowDataArray) {
+                window.closeFlowAnalyser.getByteFrequencyData(window.closeFlowDataArray);
+                const average = window.closeFlowDataArray.reduce((a, b) => a + b) / window.closeFlowDataArray.length;
+                const level = Math.min((average / 255) * 100, 100);
+                return {
+                  input: level,
+                  output: Math.random() * 30 + 10, // Simulated output for now
+                  systemAudio: Math.random() * 40 + 15 // Simulated system audio for now
+                };
               }
-            })()
-          `);
+              return null;
+            } catch (error) {
+              console.error('Error getting audio levels:', error);
+              return null;
+            }
+          })()
+        `);
 
-          if (levels) {
-            this.audioLevels = levels;
-          } else {
-            // Fallback to simulation if real monitoring fails
-            this.audioLevels = {
-              input: Math.random() * 40 + 10,
-              output: Math.random() * 30 + 10,
-              systemAudio: Math.random() * 40 + 15
-            };
-          }
-
-          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-            this.mainWindow.webContents.send('audio-levels-updated', this.audioLevels);
-          }
+        if (levels) {
+          this.audioLevels = levels;
+        } else {
+          // Fallback to simulation if real monitoring fails
+          this.audioLevels = {
+            input: Math.random() * 40 + 10,
+            output: Math.random() * 30 + 10,
+            systemAudio: Math.random() * 40 + 15
+          };
         }
+
+        this.sendToRenderer('audio-levels-updated', this.audioLevels);
       } catch (error) {
-        console.error('Error in audio level monitoring:', error);
+        if (!this.isShuttingDown) {
+          console.error('Error in audio level monitoring:', error);
+        }
       }
     }, 100); // Update every 100ms for smooth animation
   }
@@ -633,6 +681,8 @@ class CloseFlowDesktop {
     }
 
     this.audioMonitorInterval = setInterval(() => {
+      if (this.isShuttingDown) return;
+
       // More realistic simulation based on whether we're in a call
       if (this.isCallActive && this.isZoomDetected) {
         // Simulate active conversation levels
@@ -650,9 +700,7 @@ class CloseFlowDesktop {
         };
       }
 
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        this.mainWindow.webContents.send('audio-levels-updated', this.audioLevels);
-      }
+      this.sendToRenderer('audio-levels-updated', this.audioLevels);
     }, 150);
   }
 
@@ -662,7 +710,9 @@ class CloseFlowDesktop {
     
     // Check connection status
     this.connectionCheckInterval = setInterval(async () => {
-      await this.checkWebAppConnection();
+      if (!this.isShuttingDown) {
+        await this.checkWebAppConnection();
+      }
     }, 3000);
     
     // Start polling for messages from web app
@@ -674,7 +724,7 @@ class CloseFlowDesktop {
 
   startPing() {
     this.pingInterval = setInterval(async () => {
-      if (this.isConnected) {
+      if (this.isConnected && !this.isShuttingDown) {
         try {
           await this.sendPing();
         } catch (error) {
@@ -689,7 +739,7 @@ class CloseFlowDesktop {
 
   startMessagePolling() {
     this.messagePollingInterval = setInterval(async () => {
-      if (this.isConnected) {
+      if (this.isConnected && !this.isShuttingDown) {
         try {
           await this.pollWebAppMessages();
         } catch (error) {
@@ -731,14 +781,12 @@ class CloseFlowDesktop {
         this.isStartingCall = false;
         this.updateTrayMenu();
         
-        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-          this.mainWindow.webContents.send('zoom-status-changed', {
-            detected: this.isZoomDetected,
-            callActive: this.isCallActive,
-            isStartingCall: this.isStartingCall,
-            isStoppingCall: this.isStoppingCall
-          });
-        }
+        this.sendToRenderer('zoom-status-changed', {
+          detected: this.isZoomDetected,
+          callActive: this.isCallActive,
+          isStartingCall: this.isStartingCall,
+          isStoppingCall: this.isStoppingCall
+        });
         
         this.showNotification('Analysis Started', 'Call analysis is now active. Check the web app for real-time insights.');
         break;
@@ -750,14 +798,12 @@ class CloseFlowDesktop {
         this.isStoppingCall = false;
         this.updateTrayMenu();
         
-        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-          this.mainWindow.webContents.send('zoom-status-changed', {
-            detected: this.isZoomDetected,
-            callActive: this.isCallActive,
-            isStartingCall: this.isStartingCall,
-            isStoppingCall: this.isStoppingCall
-          });
-        }
+        this.sendToRenderer('zoom-status-changed', {
+          detected: this.isZoomDetected,
+          callActive: this.isCallActive,
+          isStartingCall: this.isStartingCall,
+          isStoppingCall: this.isStoppingCall
+        });
         
         this.showNotification('Analysis Stopped', 'Call analysis has been stopped. Check the web app for the complete analysis.');
         break;
@@ -827,9 +873,7 @@ class CloseFlowDesktop {
   }
 
   updateConnectionStatus(status) {
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send('connection-status-changed', status);
-    }
+    this.sendToRenderer('connection-status-changed', status);
   }
 
   async startCallAnalysis() {
@@ -854,14 +898,12 @@ class CloseFlowDesktop {
       this.updateTrayMenu();
       
       // Update renderer with new state
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        this.mainWindow.webContents.send('zoom-status-changed', {
-          detected: this.isZoomDetected,
-          callActive: this.isCallActive,
-          isStartingCall: this.isStartingCall,
-          isStoppingCall: this.isStoppingCall
-        });
-      }
+      this.sendToRenderer('zoom-status-changed', {
+        detected: this.isZoomDetected,
+        callActive: this.isCallActive,
+        isStartingCall: this.isStartingCall,
+        isStoppingCall: this.isStoppingCall
+      });
       
       // Initialize system audio capture with main window reference
       const captureInitialized = await this.systemAudioCapture.initialize(this.selectedSystemAudioSource, this.mainWindow);
@@ -911,14 +953,12 @@ class CloseFlowDesktop {
             this.updateTrayMenu();
             
             // Update renderer
-            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-              this.mainWindow.webContents.send('zoom-status-changed', {
-                detected: this.isZoomDetected,
-                callActive: this.isCallActive,
-                isStartingCall: this.isStartingCall,
-                isStoppingCall: this.isStoppingCall
-              });
-            }
+            this.sendToRenderer('zoom-status-changed', {
+              detected: this.isZoomDetected,
+              callActive: this.isCallActive,
+              isStartingCall: this.isStartingCall,
+              isStoppingCall: this.isStoppingCall
+            });
             
             this.showNotification('Start Failed', 'Web app did not confirm call start. Please try again.');
             
@@ -937,14 +977,12 @@ class CloseFlowDesktop {
       this.updateTrayMenu();
       
       // Update renderer
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        this.mainWindow.webContents.send('zoom-status-changed', {
-          detected: this.isZoomDetected,
-          callActive: this.isCallActive,
-          isStartingCall: this.isStartingCall,
-          isStoppingCall: this.isStoppingCall
-        });
-      }
+      this.sendToRenderer('zoom-status-changed', {
+        detected: this.isZoomDetected,
+        callActive: this.isCallActive,
+        isStartingCall: this.isStartingCall,
+        isStoppingCall: this.isStoppingCall
+      });
       
       // Stop system audio capture on error
       this.systemAudioCapture.stopCapture();
@@ -963,14 +1001,12 @@ class CloseFlowDesktop {
       this.updateTrayMenu();
       
       // Update renderer with new state
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        this.mainWindow.webContents.send('zoom-status-changed', {
-          detected: this.isZoomDetected,
-          callActive: this.isCallActive,
-          isStartingCall: this.isStartingCall,
-          isStoppingCall: this.isStoppingCall
-        });
-      }
+      this.sendToRenderer('zoom-status-changed', {
+        detected: this.isZoomDetected,
+        callActive: this.isCallActive,
+        isStartingCall: this.isStartingCall,
+        isStoppingCall: this.isStoppingCall
+      });
       
       // Stop system audio capture
       this.systemAudioCapture.stopCapture();
@@ -1005,14 +1041,12 @@ class CloseFlowDesktop {
           this.updateTrayMenu();
           
           // Update renderer
-          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-            this.mainWindow.webContents.send('zoom-status-changed', {
-              detected: this.isZoomDetected,
-              callActive: this.isCallActive,
-              isStartingCall: this.isStartingCall,
-              isStoppingCall: this.isStoppingCall
-            });
-          }
+          this.sendToRenderer('zoom-status-changed', {
+            detected: this.isZoomDetected,
+            callActive: this.isCallActive,
+            isStartingCall: this.isStartingCall,
+            isStoppingCall: this.isStoppingCall
+          });
           
           this.showNotification('Stop Completed', 'Call analysis has been stopped.');
         }
@@ -1025,31 +1059,46 @@ class CloseFlowDesktop {
       this.updateTrayMenu();
       
       // Update renderer
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        this.mainWindow.webContents.send('zoom-status-changed', {
-          detected: this.isZoomDetected,
-          callActive: this.isCallActive,
-          isStartingCall: this.isStartingCall,
-          isStoppingCall: this.isStoppingCall
-        });
-      }
+      this.sendToRenderer('zoom-status-changed', {
+        detected: this.isZoomDetected,
+        callActive: this.isCallActive,
+        isStartingCall: this.isStartingCall,
+        isStoppingCall: this.isStoppingCall
+      });
       
       throw error;
     }
   }
 
   showNotification(title, body) {
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send('show-notification', { title, body });
-    }
+    this.sendToRenderer('show-notification', { title, body });
   }
 
   cleanup() {
-    if (this.zoomCheckInterval) clearInterval(this.zoomCheckInterval);
-    if (this.audioMonitorInterval) clearInterval(this.audioMonitorInterval);
-    if (this.connectionCheckInterval) clearInterval(this.connectionCheckInterval);
-    if (this.messagePollingInterval) clearInterval(this.messagePollingInterval);
-    if (this.pingInterval) clearInterval(this.pingInterval);
+    console.log('🧹 Cleaning up CloseFlow Desktop...');
+    this.isShuttingDown = true;
+
+    // Clear all intervals
+    if (this.zoomCheckInterval) {
+      clearInterval(this.zoomCheckInterval);
+      this.zoomCheckInterval = null;
+    }
+    if (this.audioMonitorInterval) {
+      clearInterval(this.audioMonitorInterval);
+      this.audioMonitorInterval = null;
+    }
+    if (this.connectionCheckInterval) {
+      clearInterval(this.connectionCheckInterval);
+      this.connectionCheckInterval = null;
+    }
+    if (this.messagePollingInterval) {
+      clearInterval(this.messagePollingInterval);
+      this.messagePollingInterval = null;
+    }
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
     
     // Stop system audio capture
     if (this.systemAudioCapture) {
@@ -1061,6 +1110,8 @@ class CloseFlowDesktop {
       this.websocketServer.kill();
       this.websocketServer = null;
     }
+
+    console.log('✅ Cleanup completed');
   }
 }
 
