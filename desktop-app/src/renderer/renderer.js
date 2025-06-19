@@ -5,7 +5,9 @@ class DesktopRenderer {
         this.isCallActive = false;
         this.zoomDetected = false;
         this.audioDevices = { input: [], output: [] };
+        this.systemAudioSources = [];
         this.selectedDevices = { input: null, output: null };
+        this.selectedSystemAudioSource = null;
         this.connectionStatus = 'connecting';
         this.isStartingCall = false;
         this.isStoppingCall = false;
@@ -25,10 +27,13 @@ class DesktopRenderer {
         // Device elements
         this.inputDevice = document.getElementById('inputDevice');
         this.outputDevice = document.getElementById('outputDevice');
+        this.systemAudioDevice = document.getElementById('systemAudioDevice');
         this.inputLevel = document.getElementById('inputLevel');
         this.outputLevel = document.getElementById('outputLevel');
+        this.systemAudioLevel = document.getElementById('systemAudioLevel');
         this.inputLevelText = document.getElementById('inputLevelText');
         this.outputLevelText = document.getElementById('outputLevelText');
+        this.systemAudioLevelText = document.getElementById('systemAudioLevelText');
         
         // Control elements
         this.startAnalysisBtn = document.getElementById('startAnalysisBtn');
@@ -90,6 +95,12 @@ class DesktopRenderer {
                 this.selectOutputDevice(e.target.value);
             }
         });
+
+        this.systemAudioDevice.addEventListener('change', (e) => {
+            if (e.target.value) {
+                this.selectSystemAudioSource(e.target.value);
+            }
+        });
     }
 
     async loadInitialData() {
@@ -98,10 +109,15 @@ class DesktopRenderer {
             this.audioDevices = await ipcRenderer.invoke('get-audio-devices');
             this.populateDeviceSelects();
             
+            // Load system audio sources
+            this.systemAudioSources = await ipcRenderer.invoke('get-desktop-audio-sources');
+            this.populateSystemAudioSources();
+            
             // Get current status
             const status = await ipcRenderer.invoke('get-status');
             this.updateZoomStatus(status.zoomDetected, status.callActive, status.isStartingCall, status.isStoppingCall);
             this.selectedDevices = status.selectedDevices;
+            this.selectedSystemAudioSource = status.selectedSystemAudioSource;
             
             // Update connection status
             this.updateConnectionStatus(status.webAppConnected ? 'connected' : 'disconnected');
@@ -150,6 +166,33 @@ class DesktopRenderer {
             option.value = '';
             option.textContent = 'No output devices found';
             this.outputDevice.appendChild(option);
+        }
+    }
+
+    populateSystemAudioSources() {
+        this.systemAudioDevice.innerHTML = '';
+        
+        if (this.systemAudioSources && this.systemAudioSources.length > 0) {
+            this.systemAudioSources.forEach(source => {
+                const option = document.createElement('option');
+                option.value = source.id;
+                option.textContent = `${source.name} (${source.type})`;
+                if (source.id === this.selectedSystemAudioSource) {
+                    option.selected = true;
+                }
+                this.systemAudioDevice.appendChild(option);
+            });
+            
+            // Auto-select first source if none selected
+            if (!this.selectedSystemAudioSource && this.systemAudioSources.length > 0) {
+                this.selectedSystemAudioSource = this.systemAudioSources[0].id;
+                this.systemAudioDevice.value = this.selectedSystemAudioSource;
+            }
+        } else {
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = 'No system audio sources found';
+            this.systemAudioDevice.appendChild(option);
         }
     }
 
@@ -268,6 +311,12 @@ class DesktopRenderer {
             this.outputLevel.style.width = `${Math.min(levels.output, 100)}%`;
             this.outputLevelText.textContent = `${Math.round(levels.output)}%`;
         }
+
+        // Update system audio level
+        if (this.systemAudioLevel && this.systemAudioLevelText) {
+            this.systemAudioLevel.style.width = `${Math.min(levels.systemAudio || 0, 100)}%`;
+            this.systemAudioLevelText.textContent = `${Math.round(levels.systemAudio || 0)}%`;
+        }
     }
 
     async selectInputDevice(deviceId) {
@@ -292,9 +341,25 @@ class DesktopRenderer {
         }
     }
 
+    async selectSystemAudioSource(sourceId) {
+        try {
+            await ipcRenderer.invoke('select-system-audio-source', sourceId);
+            this.selectedSystemAudioSource = sourceId;
+            this.showNotification('System Audio Source Changed', `Selected: ${this.getSystemAudioSourceName(sourceId)}`, 'success');
+        } catch (error) {
+            console.error('Error selecting system audio source:', error);
+            this.showNotification('Error', 'Failed to change system audio source', 'error');
+        }
+    }
+
     getDeviceName(type, deviceId) {
         const device = this.audioDevices[type]?.find(d => d.id === deviceId);
         return device ? device.name : 'Unknown Device';
+    }
+
+    getSystemAudioSourceName(sourceId) {
+        const source = this.systemAudioSources?.find(s => s.id === sourceId);
+        return source ? `${source.name} (${source.type})` : 'Unknown Source';
     }
 
     async startCallAnalysis() {
@@ -305,7 +370,11 @@ class DesktopRenderer {
             this.updateButtonStates();
             this.updateAnalysisStatus();
 
-            const result = await ipcRenderer.invoke('start-call-analysis');
+            const result = await ipcRenderer.invoke('start-call-analysis', {
+                inputDeviceId: this.selectedDevices.input,
+                outputDeviceId: this.selectedDevices.output,
+                systemAudioSourceId: this.selectedSystemAudioSource
+            });
             
             if (!result.success) {
                 throw new Error(result.message || 'Failed to start call analysis');

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, dialog, systemPreferences } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, dialog, systemPreferences, desktopCapturer } = require('electron');
 const path = require('path');
 const { execSync, spawn } = require('child_process');
 
@@ -12,7 +12,8 @@ class CloseFlowDesktop {
     this.zoomCheckInterval = null;
     this.audioDevices = { input: [], output: [] };
     this.selectedDevices = { input: null, output: null };
-    this.audioLevels = { input: 0, output: 0 };
+    this.selectedSystemAudioSource = null;
+    this.audioLevels = { input: 0, output: 0, systemAudio: 0 };
     this.audioMonitorInterval = null;
     this.connectionCheckInterval = null;
     this.messagePollingInterval = null;
@@ -38,7 +39,7 @@ class CloseFlowDesktop {
   async createWindow() {
     this.mainWindow = new BrowserWindow({
       width: 400,
-      height: 600,
+      height: 700, // Increased height for new system audio section
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: false
@@ -123,8 +124,15 @@ class CloseFlowDesktop {
   }
 
   setupIPC() {
-    ipcMain.handle('start-call-analysis', async () => {
+    ipcMain.handle('start-call-analysis', async (event, options = {}) => {
       try {
+        const { inputDeviceId, outputDeviceId, systemAudioSourceId } = options;
+        
+        // Update selected devices if provided
+        if (inputDeviceId) this.selectedDevices.input = inputDeviceId;
+        if (outputDeviceId) this.selectedDevices.output = outputDeviceId;
+        if (systemAudioSourceId) this.selectedSystemAudioSource = systemAudioSourceId;
+        
         return await this.startCallAnalysis();
       } catch (error) {
         console.error('Error in start-call-analysis handler:', error);
@@ -162,6 +170,17 @@ class CloseFlowDesktop {
       }
     });
 
+    ipcMain.handle('select-system-audio-source', async (event, sourceId) => {
+      try {
+        this.selectedSystemAudioSource = sourceId;
+        console.log('Selected system audio source:', sourceId);
+        return true;
+      } catch (error) {
+        console.error('Error in select-system-audio-source handler:', error);
+        throw error;
+      }
+    });
+
     ipcMain.handle('get-audio-devices', async () => {
       try {
         await this.loadAudioDevices();
@@ -172,12 +191,50 @@ class CloseFlowDesktop {
       }
     });
 
+    ipcMain.handle('get-desktop-audio-sources', async () => {
+      try {
+        console.log('🔍 Fetching desktop audio sources...');
+        
+        const sources = await desktopCapturer.getSources({
+          types: ['window', 'screen'],
+          fetchWindowIcons: false
+        });
+
+        // Filter sources that might have audio and format for UI
+        const audioSources = sources
+          .filter(source => {
+            // Include screen sources and specific application windows
+            return source.id.startsWith('screen:') || 
+                   source.name.toLowerCase().includes('zoom') ||
+                   source.name.toLowerCase().includes('audio') ||
+                   source.name.toLowerCase().includes('system') ||
+                   source.id.startsWith('window:');
+          })
+          .map(source => ({
+            id: source.id,
+            name: source.name,
+            type: source.id.startsWith('screen:') ? 'screen' : 'window'
+          }));
+
+        console.log('📊 Found audio sources:', audioSources.length);
+        audioSources.forEach(source => {
+          console.log(`  - ${source.type}: ${source.name} (${source.id})`);
+        });
+
+        return audioSources;
+      } catch (error) {
+        console.error('Error getting desktop audio sources:', error);
+        return [];
+      }
+    });
+
     ipcMain.handle('get-status', () => {
       try {
         return {
           zoomDetected: this.isZoomDetected,
           callActive: this.isCallActive,
           selectedDevices: this.selectedDevices,
+          selectedSystemAudioSource: this.selectedSystemAudioSource,
           audioLevels: this.audioLevels,
           webAppConnected: this.isConnected,
           isStartingCall: this.isStartingCall,
@@ -202,7 +259,7 @@ class CloseFlowDesktop {
         dialog.showMessageBox(this.mainWindow, {
           type: 'info',
           title: 'Screen Recording Permission Required',
-          message: 'CloseFlow needs screen recording permission to detect Zoom meetings. Please grant permission in System Preferences > Security & Privacy > Screen Recording.',
+          message: 'CloseFlow needs screen recording permission to detect Zoom meetings and capture system audio. Please grant permission in System Preferences > Security & Privacy > Screen Recording.',
           buttons: ['OK']
         });
       }
@@ -442,7 +499,8 @@ class CloseFlowDesktop {
                   const level = Math.min((average / 255) * 100, 100);
                   return {
                     input: level,
-                    output: Math.random() * 30 + 10 // Simulated output for now
+                    output: Math.random() * 30 + 10, // Simulated output for now
+                    systemAudio: Math.random() * 40 + 15 // Simulated system audio for now
                   };
                 }
                 return null;
@@ -459,7 +517,8 @@ class CloseFlowDesktop {
             // Fallback to simulation if real monitoring fails
             this.audioLevels = {
               input: Math.random() * 40 + 10,
-              output: Math.random() * 30 + 10
+              output: Math.random() * 30 + 10,
+              systemAudio: Math.random() * 40 + 15
             };
           }
 
@@ -484,13 +543,15 @@ class CloseFlowDesktop {
         // Simulate active conversation levels
         this.audioLevels = {
           input: Math.random() * 60 + 20, // 20-80%
-          output: Math.random() * 40 + 30  // 30-70%
+          output: Math.random() * 40 + 30,  // 30-70%
+          systemAudio: Math.random() * 50 + 25  // 25-75%
         };
       } else {
         // Simulate ambient/idle levels
         this.audioLevels = {
           input: Math.random() * 20 + 5,  // 5-25%
-          output: Math.random() * 15 + 5  // 5-20%
+          output: Math.random() * 15 + 5,  // 5-20%
+          systemAudio: Math.random() * 25 + 10  // 10-35%
         };
       }
 
@@ -711,7 +772,11 @@ class CloseFlowDesktop {
         },
         body: JSON.stringify({
           type: 'start-call-analysis',
-          deviceSettings: this.selectedDevices,
+          deviceSettings: {
+            input: this.selectedDevices.input,
+            output: this.selectedDevices.output,
+            systemAudioSource: this.selectedSystemAudioSource
+          },
           timestamp: Date.now()
         })
       });
