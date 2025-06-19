@@ -179,7 +179,9 @@ class CloseFlowDesktop {
           callActive: this.isCallActive,
           selectedDevices: this.selectedDevices,
           audioLevels: this.audioLevels,
-          webAppConnected: this.isConnected
+          webAppConnected: this.isConnected,
+          isStartingCall: this.isStartingCall,
+          isStoppingCall: this.isStoppingCall
         };
       } catch (error) {
         console.error('Error in get-status handler:', error);
@@ -266,7 +268,9 @@ class CloseFlowDesktop {
       if (this.mainWindow && !this.mainWindow.isDestroyed()) {
         this.mainWindow.webContents.send('zoom-status-changed', {
           detected: this.isZoomDetected,
-          callActive: this.isCallActive
+          callActive: this.isCallActive,
+          isStartingCall: this.isStartingCall,
+          isStoppingCall: this.isStoppingCall
         });
       }
 
@@ -574,7 +578,9 @@ class CloseFlowDesktop {
         if (this.mainWindow && !this.mainWindow.isDestroyed()) {
           this.mainWindow.webContents.send('zoom-status-changed', {
             detected: this.isZoomDetected,
-            callActive: this.isCallActive
+            callActive: this.isCallActive,
+            isStartingCall: this.isStartingCall,
+            isStoppingCall: this.isStoppingCall
           });
         }
         
@@ -591,7 +597,9 @@ class CloseFlowDesktop {
         if (this.mainWindow && !this.mainWindow.isDestroyed()) {
           this.mainWindow.webContents.send('zoom-status-changed', {
             detected: this.isZoomDetected,
-            callActive: this.isCallActive
+            callActive: this.isCallActive,
+            isStartingCall: this.isStartingCall,
+            isStoppingCall: this.isStoppingCall
           });
         }
         
@@ -685,6 +693,16 @@ class CloseFlowDesktop {
       this.isStartingCall = true;
       this.updateTrayMenu();
       
+      // Update renderer with new state
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send('zoom-status-changed', {
+          detected: this.isZoomDetected,
+          callActive: this.isCallActive,
+          isStartingCall: this.isStartingCall,
+          isStoppingCall: this.isStoppingCall
+        });
+      }
+      
       // Send message to web app via HTTP
       const response = await fetch(`${this.webAppUrl}/api/desktop-sync`, {
         method: 'POST',
@@ -715,6 +733,17 @@ class CloseFlowDesktop {
             console.log('⚠️ Timeout waiting for web app confirmation');
             this.isStartingCall = false;
             this.updateTrayMenu();
+            
+            // Update renderer
+            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+              this.mainWindow.webContents.send('zoom-status-changed', {
+                detected: this.isZoomDetected,
+                callActive: this.isCallActive,
+                isStartingCall: this.isStartingCall,
+                isStoppingCall: this.isStoppingCall
+              });
+            }
+            
             this.showNotification('Start Failed', 'Web app did not confirm call start. Please try again.');
           }
         }, 15000); // 15 second timeout
@@ -727,6 +756,17 @@ class CloseFlowDesktop {
       console.error('❌ Error starting call analysis:', error);
       this.isStartingCall = false;
       this.updateTrayMenu();
+      
+      // Update renderer
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send('zoom-status-changed', {
+          detected: this.isZoomDetected,
+          callActive: this.isCallActive,
+          isStartingCall: this.isStartingCall,
+          isStoppingCall: this.isStoppingCall
+        });
+      }
+      
       throw error;
     }
   }
@@ -739,6 +779,16 @@ class CloseFlowDesktop {
     try {
       this.isStoppingCall = true;
       this.updateTrayMenu();
+      
+      // Update renderer with new state
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send('zoom-status-changed', {
+          detected: this.isZoomDetected,
+          callActive: this.isCallActive,
+          isStartingCall: this.isStartingCall,
+          isStoppingCall: this.isStoppingCall
+        });
+      }
       
       // Send message to web app via HTTP
       const response = await fetch(`${this.webAppUrl}/api/desktop-sync`, {
@@ -768,6 +818,17 @@ class CloseFlowDesktop {
           this.isStoppingCall = false;
           this.isCallActive = false;
           this.updateTrayMenu();
+          
+          // Update renderer
+          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send('zoom-status-changed', {
+              detected: this.isZoomDetected,
+              callActive: this.isCallActive,
+              isStartingCall: this.isStartingCall,
+              isStoppingCall: this.isStoppingCall
+            });
+          }
+          
           this.showNotification('Stop Completed', 'Call analysis has been stopped.');
         }
       }, 10000); // 10 second timeout
@@ -777,6 +838,17 @@ class CloseFlowDesktop {
       console.error('❌ Error stopping call analysis:', error);
       this.isStoppingCall = false;
       this.updateTrayMenu();
+      
+      // Update renderer
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send('zoom-status-changed', {
+          detected: this.isZoomDetected,
+          callActive: this.isCallActive,
+          isStartingCall: this.isStartingCall,
+          isStoppingCall: this.isStoppingCall
+        });
+      }
+      
       throw error;
     }
   }

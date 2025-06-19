@@ -113,15 +113,17 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStatusChange }: CallAnaly
     
     switch (message.type) {
       case 'desktop-call-started':
-        console.log('🎯 Desktop triggered call start - starting live analysis');
+        console.log('🎯 Desktop triggered call start - starting live analysis immediately');
         if (!live && !connecting) {
           setDesktopTriggered(true);
-          // Start the live analysis immediately
-          await startLive(true);
-          // Notify parent component
+          
+          // CRITICAL: Notify parent component FIRST to update UI state
           if (onDesktopCallStatusChange) {
             onDesktopCallStatusChange(true);
           }
+          
+          // Then start the live analysis
+          await startLive(true);
         }
         break;
       case 'desktop-call-stopped':

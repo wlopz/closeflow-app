@@ -46,7 +46,7 @@ class DesktopRenderer {
     setupEventListeners() {
         // IPC listeners
         ipcRenderer.on('zoom-status-changed', (event, data) => {
-            this.updateZoomStatus(data.detected, data.callActive);
+            this.updateZoomStatus(data.detected, data.callActive, data.isStartingCall, data.isStoppingCall);
         });
 
         ipcRenderer.on('audio-levels-updated', (event, levels) => {
@@ -100,7 +100,7 @@ class DesktopRenderer {
             
             // Get current status
             const status = await ipcRenderer.invoke('get-status');
-            this.updateZoomStatus(status.zoomDetected, status.callActive);
+            this.updateZoomStatus(status.zoomDetected, status.callActive, status.isStartingCall, status.isStoppingCall);
             this.selectedDevices = status.selectedDevices;
             
             // Update connection status
@@ -172,9 +172,11 @@ class DesktopRenderer {
         this.updateButtonStates();
     }
 
-    updateZoomStatus(detected, callActive) {
+    updateZoomStatus(detected, callActive, isStartingCall = false, isStoppingCall = false) {
         this.zoomDetected = detected;
         this.isCallActive = callActive;
+        this.isStartingCall = isStartingCall;
+        this.isStoppingCall = isStoppingCall;
         
         if (detected) {
             this.zoomStatus.className = 'status-card active';
@@ -242,6 +244,9 @@ class DesktopRenderer {
         } else if (this.isStartingCall) {
             this.analysisStatus.className = 'analysis-status';
             this.analysisStatus.querySelector('p').textContent = 'Starting call analysis - waiting for web app confirmation...';
+        } else if (this.isStoppingCall) {
+            this.analysisStatus.className = 'analysis-status';
+            this.analysisStatus.querySelector('p').textContent = 'Stopping call analysis - waiting for web app confirmation...';
         } else if (this.zoomDetected) {
             this.analysisStatus.className = 'analysis-status';
             this.analysisStatus.querySelector('p').textContent = 'Ready to start call analysis';
