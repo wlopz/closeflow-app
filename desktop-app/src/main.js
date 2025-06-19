@@ -27,6 +27,10 @@ class CloseFlowDesktop {
     this.systemAudioCapture = new SystemAudioCapture();
     this.websocketServer = null;
     this.isShuttingDown = false;
+    
+    // Add timeout references for proper cleanup
+    this.startCallTimeout = null;
+    this.stopCallTimeout = null;
   }
 
   async initialize() {
@@ -458,10 +462,14 @@ class CloseFlowDesktop {
     }
   }
 
-  // Safe method to send messages to renderer
+  // Enhanced safe method to send messages to renderer
   sendToRenderer(channel, data) {
     try {
-      if (this.mainWindow && !this.mainWindow.isDestroyed() && !this.isShuttingDown) {
+      if (this.mainWindow && 
+          !this.mainWindow.isDestroyed() && 
+          !this.isShuttingDown &&
+          this.mainWindow.webContents &&
+          !this.mainWindow.webContents.isDestroyed()) {
         this.mainWindow.webContents.send(channel, data);
       }
     } catch (error) {
@@ -472,10 +480,14 @@ class CloseFlowDesktop {
     }
   }
 
-  // Safe method to execute JavaScript in renderer
+  // Enhanced safe method to execute JavaScript in renderer
   async executeInRenderer(script) {
     try {
-      if (this.mainWindow && !this.mainWindow.isDestroyed() && !this.isShuttingDown) {
+      if (this.mainWindow && 
+          !this.mainWindow.isDestroyed() && 
+          !this.isShuttingDown &&
+          this.mainWindow.webContents &&
+          !this.mainWindow.webContents.isDestroyed()) {
         return await this.mainWindow.webContents.executeJavaScript(script);
       }
       return null;
@@ -776,6 +788,12 @@ class CloseFlowDesktop {
     switch (message.type) {
       case 'web-app-call-started-confirmation':
         console.log('✅ Web app confirmed call analysis started');
+        // Clear the start timeout since we got confirmation
+        if (this.startCallTimeout) {
+          clearTimeout(this.startCallTimeout);
+          this.startCallTimeout = null;
+        }
+        
         // CRITICAL: Only now set isCallActive to true
         this.isCallActive = true;
         this.isStartingCall = false;
@@ -793,6 +811,12 @@ class CloseFlowDesktop {
         
       case 'web-app-call-stopped-confirmation':
         console.log('✅ Web app confirmed call analysis stopped');
+        // Clear the stop timeout since we got confirmation
+        if (this.stopCallTimeout) {
+          clearTimeout(this.stopCallTimeout);
+          this.stopCallTimeout = null;
+        }
+        
         // CRITICAL: Only now set isCallActive to false
         this.isCallActive = false;
         this.isStoppingCall = false;
@@ -946,10 +970,11 @@ class CloseFlowDesktop {
         this.showNotification('Starting Analysis', 'Waiting for web app to establish connection...');
         
         // Set a timeout in case we don't get confirmation
-        setTimeout(() => {
+        this.startCallTimeout = setTimeout(() => {
           if (this.isStartingCall && !this.isCallActive) {
             console.log('⚠️ Timeout waiting for web app confirmation');
             this.isStartingCall = false;
+            this.startCallTimeout = null;
             this.updateTrayMenu();
             
             // Update renderer
@@ -1033,11 +1058,12 @@ class CloseFlowDesktop {
       this.showNotification('Stopping Analysis', 'Waiting for web app to confirm...');
       
       // Set a timeout in case we don't get confirmation
-      setTimeout(() => {
+      this.stopCallTimeout = setTimeout(() => {
         if (this.isStoppingCall && this.isCallActive) {
           console.log('⚠️ Timeout waiting for web app stop confirmation');
           this.isStoppingCall = false;
           this.isCallActive = false;
+          this.stopCallTimeout = null;
           this.updateTrayMenu();
           
           // Update renderer
@@ -1098,6 +1124,16 @@ class CloseFlowDesktop {
     if (this.pingInterval) {
       clearInterval(this.pingInterval);
       this.pingInterval = null;
+    }
+    
+    // Clear timeouts to prevent render frame errors
+    if (this.startCallTimeout) {
+      clearTimeout(this.startCallTimeout);
+      this.startCallTimeout = null;
+    }
+    if (this.stopCallTimeout) {
+      clearTimeout(this.stopCallTimeout);
+      this.stopCallTimeout = null;
     }
     
     // Stop system audio capture
