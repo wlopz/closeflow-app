@@ -31,6 +31,9 @@ class CloseFlowDesktop {
     // Add timeout references for proper cleanup
     this.startCallTimeout = null;
     this.stopCallTimeout = null;
+    
+    // Add flag to track if renderer is ready
+    this.rendererReady = false;
   }
 
   async initialize() {
@@ -94,6 +97,7 @@ class CloseFlowDesktop {
 
     this.mainWindow.once('ready-to-show', () => {
       this.mainWindow.show();
+      this.rendererReady = true;
       this.setupRendererAPI();
     });
 
@@ -106,13 +110,25 @@ class CloseFlowDesktop {
 
     this.mainWindow.on('closed', () => {
       this.isShuttingDown = true;
+      this.rendererReady = false;
       this.cleanup();
+    });
+
+    // Handle renderer process crashes
+    this.mainWindow.webContents.on('render-process-gone', () => {
+      console.log('🔄 Renderer process gone, marking as not ready');
+      this.rendererReady = false;
+    });
+
+    this.mainWindow.webContents.on('did-finish-load', () => {
+      console.log('✅ Renderer finished loading, marking as ready');
+      this.rendererReady = true;
     });
   }
 
   setupRendererAPI() {
     // Wait for renderer to be ready, then expose API
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+    if (this.isRendererSafe()) {
       this.mainWindow.webContents.executeJavaScript(`
         window.electronAPI = {
           sendAudioData: (audioData) => {
@@ -131,6 +147,7 @@ class CloseFlowDesktop {
         console.log('✅ Electron API exposed to renderer');
       `).catch(err => {
         console.error('Error setting up renderer API:', err);
+        this.rendererReady = false;
       });
     }
   }
@@ -462,20 +479,27 @@ class CloseFlowDesktop {
     }
   }
 
+  // Check if renderer is safe to interact with
+  isRendererSafe() {
+    return this.mainWindow && 
+           !this.mainWindow.isDestroyed() && 
+           !this.isShuttingDown &&
+           this.mainWindow.webContents &&
+           !this.mainWindow.webContents.isDestroyed() &&
+           this.rendererReady;
+  }
+
   // Enhanced safe method to send messages to renderer
   sendToRenderer(channel, data) {
     try {
-      if (this.mainWindow && 
-          !this.mainWindow.isDestroyed() && 
-          !this.isShuttingDown &&
-          this.mainWindow.webContents &&
-          !this.mainWindow.webContents.isDestroyed()) {
+      if (this.isRendererSafe()) {
         this.mainWindow.webContents.send(channel, data);
       }
     } catch (error) {
       // Silently ignore renderer communication errors during shutdown
       if (!this.isShuttingDown) {
         console.error(`Error sending to renderer (${channel}):`, error.message);
+        this.rendererReady = false; // Mark renderer as not ready on error
       }
     }
   }
@@ -483,17 +507,14 @@ class CloseFlowDesktop {
   // Enhanced safe method to execute JavaScript in renderer
   async executeInRenderer(script) {
     try {
-      if (this.mainWindow && 
-          !this.mainWindow.isDestroyed() && 
-          !this.isShuttingDown &&
-          this.mainWindow.webContents &&
-          !this.mainWindow.webContents.isDestroyed()) {
+      if (this.isRendererSafe()) {
         return await this.mainWindow.webContents.executeJavaScript(script);
       }
       return null;
     } catch (error) {
       if (!this.isShuttingDown) {
         console.error('Error executing in renderer:', error.message);
+        this.rendererReady = false; // Mark renderer as not ready on error
       }
       return null;
     }
@@ -505,7 +526,7 @@ class CloseFlowDesktop {
       let outputDevices = [];
 
       // Get real audio devices using navigator.mediaDevices
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      if (this.isRendererSafe()) {
         try {
           const devices = await this.executeInRenderer(`
             (async () => {
@@ -576,6 +597,13 @@ class CloseFlowDesktop {
       // Stop existing monitoring
       if (this.audioMonitorInterval) {
         clearInterval(this.audioMonitorInterval);
+        this.audioMonitorInterval = null;
+      }
+
+      if (!this.isRendererSafe()) {
+        console.log('⚠️ Renderer not safe, falling back to simulated audio monitoring');
+        this.startSimulatedAudioMonitoring();
+        return;
       }
 
       const success = await this.executeInRenderer(`
@@ -646,6 +674,18 @@ class CloseFlowDesktop {
       if (this.isShuttingDown) return;
 
       try {
+        // Only try to get levels if renderer is safe
+        if (!this.isRendererSafe()) {
+          // Fall back to simulation if renderer becomes unavailable
+          this.audioLevels = {
+            input: Math.random() * 40 + 10,
+            output: Math.random() * 30 + 10,
+            systemAudio: Math.random() * 40 + 15
+          };
+          this.sendToRenderer('audio-levels-updated', this.audioLevels);
+          return;
+        }
+
         const levels = await this.executeInRenderer(`
           (() => {
             try {
@@ -682,6 +722,8 @@ class CloseFlowDesktop {
       } catch (error) {
         if (!this.isShuttingDown) {
           console.error('Error in audio level monitoring:', error);
+          // Mark renderer as not ready and fall back to simulation
+          this.rendererReady = false;
         }
       }
     }, 100); // Update every 100ms for smooth animation
@@ -1103,6 +1145,7 @@ class CloseFlowDesktop {
   cleanup() {
     console.log('🧹 Cleaning up CloseFlow Desktop...');
     this.isShuttingDown = true;
+    this.rendererReady = false;
 
     // Clear all intervals
     if (this.zoomCheckInterval) {
