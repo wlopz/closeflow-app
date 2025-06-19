@@ -34,9 +34,6 @@ class CloseFlowDesktop {
     
     // Add flag to track if renderer is ready
     this.rendererReady = false;
-    
-    // Add debug mode flag
-    this.debugMode = true;
   }
 
   async initialize() {
@@ -135,52 +132,19 @@ class CloseFlowDesktop {
       this.mainWindow.webContents.executeJavaScript(`
         window.electronAPI = {
           sendAudioData: (audioData) => {
-            console.log('🎤 [RENDERER DEBUG] Received audioData:', {
-              type: typeof audioData,
-              isBlob: audioData instanceof Blob,
-              size: audioData instanceof Blob ? audioData.size : 'N/A'
-            });
-            
-            // DEBUGGING: Send simplified message instead of actual audio data
+            // Convert Blob to ArrayBuffer and send via IPC
             if (audioData instanceof Blob) {
-              const reader = new FileReader();
-              reader.onload = function() {
+              audioData.arrayBuffer().then(buffer => {
                 const { ipcRenderer } = require('electron');
-                const uint8Array = new Uint8Array(reader.result);
-                
-                console.log('🎤 [RENDERER DEBUG] Prepared uint8Array:', {
-                  type: typeof uint8Array,
-                  constructor: uint8Array.constructor.name,
-                  byteLength: uint8Array.byteLength,
-                  isUint8Array: uint8Array instanceof Uint8Array,
-                  first10Bytes: Array.from(uint8Array.slice(0, 10))
-                });
-                
-                // TEMPORARY DEBUG: Send simplified message instead of binary data
-                const debugMessage = {
-                  size: uint8Array.byteLength,
-                  type: typeof uint8Array,
-                  constructor: uint8Array.constructor.name,
-                  isUint8Array: uint8Array instanceof Uint8Array,
-                  timestamp: Date.now()
-                };
-                
-                console.log('🎤 [RENDERER DEBUG] Sending debug message:', debugMessage);
-                ipcRenderer.send('audio-data', debugMessage);
-                
-                // TODO: Uncomment this line once debugging is complete
-                // ipcRenderer.send('audio-data', uint8Array);
-              };
-              reader.onerror = function(err) {
-                console.error('❌ [RENDERER DEBUG] Error reading audio blob:', err);
-              };
-              reader.readAsArrayBuffer(audioData);
-            } else {
-              console.warn('⚠️ [RENDERER DEBUG] audioData is not a Blob:', typeof audioData);
+                // Send as Buffer to avoid cloning issues
+                ipcRenderer.send('audio-data', Array.from(new Uint8Array(buffer)));
+              }).catch(err => {
+                console.error('Error converting audio data:', err);
+              });
             }
           }
         };
-        console.log('✅ Electron API exposed to renderer with debug logging');
+        console.log('✅ Electron API exposed to renderer');
       `).catch(err => {
         console.error('Error setting up renderer API:', err);
         this.rendererReady = false;
@@ -245,44 +209,15 @@ class CloseFlowDesktop {
   }
 
   setupIPC() {
-    // Handle audio data from renderer process - DEBUGGING VERSION
-    ipcMain.on('audio-data', (event, audioData) => {
+    // Handle audio data from renderer process
+    ipcMain.on('audio-data', (event, audioArray) => {
       try {
-        console.log('🎤 [MAIN DEBUG] Received audio data:', {
-          type: typeof audioData,
-          constructor: audioData?.constructor?.name,
-          isObject: typeof audioData === 'object',
-          keys: typeof audioData === 'object' ? Object.keys(audioData) : 'N/A'
-        });
-
-        // TEMPORARY DEBUG: Handle simplified message
-        if (typeof audioData === 'object' && audioData.size !== undefined) {
-          console.log('✅ [MAIN DEBUG] Successfully received debug message:', audioData);
-          
-          // TODO: Remove this debug handling and uncomment the real audio processing below
-          return;
-        }
-
-        // REAL AUDIO PROCESSING (currently disabled for debugging)
-        /*
-        if (this.systemAudioCapture) {
-          // Check if it's a Uint8Array or regular array
-          let audioBuffer;
-          if (audioData instanceof Uint8Array) {
-            audioBuffer = Buffer.from(audioData);
-          } else if (Array.isArray(audioData)) {
-            audioBuffer = Buffer.from(audioData);
-          } else {
-            console.error('Unexpected audio data type:', typeof audioData);
-            return;
-          }
-          
+        if (this.systemAudioCapture && Array.isArray(audioArray)) {
+          const audioBuffer = Buffer.from(audioArray);
           this.systemAudioCapture.handleAudioData(audioBuffer);
         }
-        */
       } catch (error) {
-        console.error('❌ [MAIN DEBUG] Error handling audio data:', error);
-        // Don't crash the app, just log the error
+        console.error('Error handling audio data:', error);
       }
     });
 

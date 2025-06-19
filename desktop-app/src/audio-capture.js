@@ -76,6 +76,8 @@ class SystemAudioCapture {
               window.closeFlowMediaRecorder = null;
             }
 
+            console.log('🎤 Attempting getUserMedia...');
+
             // Get the audio stream from the selected source using desktopCapturer
             const stream = await navigator.mediaDevices.getUserMedia({
               audio: {
@@ -87,6 +89,7 @@ class SystemAudioCapture {
               video: false
             });
 
+            console.log('✅ getUserMedia successful!');
             window.closeFlowSystemStream = stream;
 
             // Create MediaRecorder to capture audio data
@@ -99,10 +102,13 @@ class SystemAudioCapture {
 
             // Set up data handling
             mediaRecorder.ondataavailable = (event) => {
-              if (event.data.size > 0 && window.electronAPI?.sendAudioData) {
-                // Send audio data via IPC to main process
-                window.electronAPI.sendAudioData(event.data);
-              }
+              console.log('🎤 MediaRecorder data available, size:', event.data.size);
+              
+              // TEMPORARILY DISABLED: Comment out the IPC sending to isolate audio capture from IPC
+              // if (event.data.size > 0 && window.electronAPI?.sendAudioData) {
+              //   // Send audio data via IPC to main process
+              //   window.electronAPI.sendAudioData(event.data);
+              // }
             };
 
             mediaRecorder.onerror = (error) => {
@@ -115,6 +121,7 @@ class SystemAudioCapture {
 
             // Start recording
             mediaRecorder.start(250); // Send data every 250ms
+            console.log('✅ MediaRecorder started.');
 
             console.log('✅ System audio capture started successfully');
             return true;
