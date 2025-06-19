@@ -132,14 +132,14 @@ class CloseFlowDesktop {
       this.mainWindow.webContents.executeJavaScript(`
         window.electronAPI = {
           sendAudioData: (audioData) => {
-            // FIXED: Convert Blob to ArrayBuffer properly for IPC
+            // FIXED: Send Uint8Array directly instead of converting to array
             if (audioData instanceof Blob) {
               const reader = new FileReader();
               reader.onload = function() {
                 const { ipcRenderer } = require('electron');
-                // Send as Uint8Array which can be serialized
+                // Send as Uint8Array buffer which is properly serializable
                 const uint8Array = new Uint8Array(reader.result);
-                ipcRenderer.send('audio-data', Array.from(uint8Array));
+                ipcRenderer.send('audio-data', uint8Array);
               };
               reader.onerror = function(err) {
                 console.error('Error reading audio blob:', err);
@@ -213,11 +213,21 @@ class CloseFlowDesktop {
   }
 
   setupIPC() {
-    // Handle audio data from renderer process - FIXED: Proper error handling
-    ipcMain.on('audio-data', (event, audioArray) => {
+    // Handle audio data from renderer process - FIXED: Proper Uint8Array handling
+    ipcMain.on('audio-data', (event, audioData) => {
       try {
-        if (this.systemAudioCapture && Array.isArray(audioArray)) {
-          const audioBuffer = Buffer.from(audioArray);
+        if (this.systemAudioCapture) {
+          // Check if it's a Uint8Array or regular array
+          let audioBuffer;
+          if (audioData instanceof Uint8Array) {
+            audioBuffer = Buffer.from(audioData);
+          } else if (Array.isArray(audioData)) {
+            audioBuffer = Buffer.from(audioData);
+          } else {
+            console.error('Unexpected audio data type:', typeof audioData);
+            return;
+          }
+          
           this.systemAudioCapture.handleAudioData(audioBuffer);
         }
       } catch (error) {
