@@ -93,7 +93,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStatusChange }: CallAnaly
           const messagesData = await messagesResponse.json();
           
           for (const message of messagesData.messages) {
-            handleDesktopMessage(message);
+            await handleDesktopMessage(message);
           }
         }
       } catch (error) {
@@ -108,15 +108,16 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStatusChange }: CallAnaly
     return () => clearInterval(interval);
   }, []);
 
-  const handleDesktopMessage = (message: any) => {
-    console.log('📱 Received desktop message:', message);
+  const handleDesktopMessage = async (message: any) => {
+    console.log('📱 CallAnalyzer received desktop message:', message);
     
     switch (message.type) {
       case 'desktop-call-started':
-        console.log('🎯 Desktop triggered call start');
+        console.log('🎯 Desktop triggered call start - starting live analysis');
         if (!live && !connecting) {
           setDesktopTriggered(true);
-          startLive(true);
+          // Start the live analysis immediately
+          await startLive(true);
           // Notify parent component
           if (onDesktopCallStatusChange) {
             onDesktopCallStatusChange(true);
