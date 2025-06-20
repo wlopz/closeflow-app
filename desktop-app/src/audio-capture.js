@@ -7,7 +7,7 @@ class SystemAudioCapture {
     this.isCapturing = false;
     this.selectedSourceId = null;
     this.mainWindow = null;
-    this.debugMode = true; // Enable debug mode for testing
+    this.debugMode = false; // Disable debug mode for full functionality
   }
 
   async initialize(sourceId, mainWindow) {
@@ -58,17 +58,17 @@ class SystemAudioCapture {
     try {
       console.log('🎤 Starting system audio capture...');
 
-      // STEP 1: Test desktopCapturer.getSources() independently
+      // Test desktopCapturer.getSources() independently
       const testSources = await this.testDesktopCapturer();
       if (!testSources) {
         throw new Error('Failed to get desktop sources');
       }
 
-      // STEP 2: Use the renderer process to capture audio with isolated testing
+      // Use the renderer process to capture audio with full functionality
       const success = await this.mainWindow.webContents.executeJavaScript(`
         (async () => {
           try {
-            console.log('🎤 Starting ISOLATED audio capture test in renderer process');
+            console.log('🎤 Starting system audio capture in renderer process');
             console.log('🔍 Selected source ID:', '${this.selectedSourceId}');
             
             // Clean up any existing streams first
@@ -87,17 +87,8 @@ class SystemAudioCapture {
             }
 
             console.log('🎤 About to call getUserMedia with source:', '${this.selectedSourceId}');
-            console.log('🎤 getUserMedia constraints:', {
-              audio: {
-                mandatory: {
-                  chromeMediaSource: 'desktop',
-                  chromeMediaSourceId: '${this.selectedSourceId}'
-                }
-              },
-              video: false
-            });
             
-            // ISOLATED TEST: Only getUserMedia, no MediaRecorder yet
+            // Get the audio stream from the selected source using desktopCapturer
             let stream;
             try {
               const startTime = performance.now();
@@ -134,16 +125,12 @@ class SystemAudioCapture {
               
             } catch (getUserMediaError) {
               console.error('❌ getUserMedia failed:', getUserMediaError);
-              console.error('❌ Error name:', getUserMediaError.name);
-              console.error('❌ Error message:', getUserMediaError.message);
-              console.error('❌ Error stack:', getUserMediaError.stack);
-              console.error('❌ Error toString:', getUserMediaError.toString());
               throw getUserMediaError;
             }
 
             window.closeFlowSystemStream = stream;
 
-            // STEP 3: Test MediaRecorder creation (but don't start it yet)
+            // Create MediaRecorder to capture audio data
             let mediaRecorder;
             try {
               console.log('🎤 Creating MediaRecorder...');
@@ -152,8 +139,6 @@ class SystemAudioCapture {
                 audioBitsPerSecond: 16000
               });
               console.log('✅ MediaRecorder created successfully');
-              console.log('✅ MediaRecorder state:', mediaRecorder.state);
-              console.log('✅ MediaRecorder mimeType:', mediaRecorder.mimeType);
             } catch (mediaRecorderError) {
               console.error('❌ MediaRecorder creation failed:', mediaRecorderError);
               throw mediaRecorderError;
@@ -161,21 +146,14 @@ class SystemAudioCapture {
 
             window.closeFlowMediaRecorder = mediaRecorder;
 
-            // Set up event handlers (but don't start recording yet)
+            // Set up data handling - FULL FUNCTIONALITY ENABLED
             mediaRecorder.ondataavailable = (event) => {
               console.log('🎤 MediaRecorder data available, size:', event.data.size);
               
-              // TEMPORARILY DISABLED: Comment out the IPC sending to isolate audio capture from IPC
-              // This helps us determine if the issue is with getUserMedia/MediaRecorder or with IPC
-              if (${this.debugMode}) {
-                console.log('🔍 DEBUG MODE: Not sending data via IPC to isolate the issue');
-                console.log('🔍 Data blob type:', event.data.type);
-                console.log('🔍 Data blob size:', event.data.size);
+              if (event.data.size > 0 && window.electronAPI?.sendAudioData) {
+                // Send audio data via IPC to main process
+                window.electronAPI.sendAudioData(event.data);
               }
-              
-              // if (event.data.size > 0 && window.electronAPI?.sendAudioData) {
-              //   window.electronAPI.sendAudioData(event.data);
-              // }
             };
 
             mediaRecorder.onerror = (error) => {
@@ -190,38 +168,21 @@ class SystemAudioCapture {
               console.log('▶️ MediaRecorder started');
             };
 
-            // STEP 4: Test starting MediaRecorder (this is where the issue might occur)
-            if (${this.debugMode}) {
-              console.log('🎤 DEBUG MODE: Starting MediaRecorder for 2 seconds only...');
-              try {
-                mediaRecorder.start(250); // Send data every 250ms
-                console.log('✅ MediaRecorder started successfully');
-                
-                // Stop after 2 seconds to test the full cycle
-                setTimeout(() => {
-                  if (mediaRecorder.state === 'recording') {
-                    console.log('🛑 DEBUG MODE: Stopping MediaRecorder after 2 seconds');
-                    mediaRecorder.stop();
-                  }
-                }, 2000);
-                
-              } catch (startError) {
-                console.error('❌ MediaRecorder start failed:', startError);
-                throw startError;
-              }
+            // Start recording continuously
+            console.log('🎤 Starting MediaRecorder for continuous capture...');
+            try {
+              mediaRecorder.start(250); // Send data every 250ms
+              console.log('✅ MediaRecorder started successfully');
+            } catch (startError) {
+              console.error('❌ MediaRecorder start failed:', startError);
+              throw startError;
             }
 
-            console.log('✅ System audio capture test completed successfully');
+            console.log('✅ System audio capture started successfully');
             return true;
 
           } catch (error) {
             console.error('❌ Failed to start system audio capture:', error);
-            console.error('❌ Error details:', {
-              name: error.name,
-              message: error.message,
-              stack: error.stack,
-              toString: error.toString()
-            });
             return false;
           }
         })()
@@ -230,15 +191,14 @@ class SystemAudioCapture {
       if (success) {
         this.isCapturing = true;
 
-        // Notify WebSocket server that audio capture started (but no actual data will be sent in debug mode)
+        // Notify WebSocket server that audio capture started
         if (this.websocketConnection && this.websocketConnection.readyState === WebSocket.OPEN) {
           this.websocketConnection.send(JSON.stringify({
-            type: 'start-audio-capture',
-            debugMode: this.debugMode
+            type: 'start-audio-capture'
           }));
         }
 
-        console.log('✅ System audio capture test started successfully');
+        console.log('✅ System audio capture started successfully');
         return true;
       } else {
         throw new Error('Failed to start audio capture in renderer process');
@@ -251,7 +211,7 @@ class SystemAudioCapture {
     }
   }
 
-  // New method to test desktopCapturer independently
+  // Test desktopCapturer independently
   async testDesktopCapturer() {
     try {
       console.log('🔍 Testing desktopCapturer.getSources()...');
@@ -328,13 +288,8 @@ class SystemAudioCapture {
     console.log('✅ System audio capture stopped');
   }
 
-  // Handle audio data from renderer process (disabled in debug mode)
+  // Handle audio data from renderer process
   handleAudioData(audioData) {
-    if (this.debugMode) {
-      console.log('🔍 DEBUG MODE: Received audio data but not forwarding to WebSocket');
-      return;
-    }
-
     if (this.websocketConnection && this.websocketConnection.readyState === WebSocket.OPEN) {
       this.websocketConnection.send(audioData);
     }
@@ -351,18 +306,6 @@ class SystemAudioCapture {
       this.websocketConnection.close();
       this.websocketConnection = null;
     }
-  }
-
-  // Method to disable debug mode and enable full functionality
-  disableDebugMode() {
-    console.log('🔧 Disabling debug mode - enabling full audio capture');
-    this.debugMode = false;
-  }
-
-  // Method to enable debug mode
-  enableDebugMode() {
-    console.log('🔧 Enabling debug mode - audio capture will be isolated');
-    this.debugMode = true;
   }
 }
 
