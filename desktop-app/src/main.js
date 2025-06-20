@@ -297,25 +297,12 @@ class CloseFlowDesktop {
           fetchWindowIcons: false
         });
 
-        // Filter sources that might have audio and format for UI
-        const audioSources = sources
-          .filter(source => {
-            // Include screen sources and specific application windows
-            return source.id.startsWith('screen:') || 
-                   source.name.toLowerCase().includes('zoom') ||
-                   source.name.toLowerCase().includes('audio') ||
-                   source.name.toLowerCase().includes('system') ||
-                   source.id.startsWith('window:');
-          })
-          .map(source => ({
-            id: source.id,
-            name: source.name,
-            type: source.id.startsWith('screen:') ? 'screen' : 'window'
-          }));
+        // Enhanced filtering and prioritization for system audio sources
+        const audioSources = this.prioritizeSystemAudioSources(sources);
 
         console.log('📊 Found audio sources:', audioSources.length);
         audioSources.forEach(source => {
-          console.log(`  - ${source.type}: ${source.name} (${source.id})`);
+          console.log(`  - ${source.type}: ${source.name} (${source.id}) [Priority: ${source.priority}]`);
         });
 
         this.systemAudioSources = audioSources;
@@ -345,6 +332,52 @@ class CloseFlowDesktop {
     });
   }
 
+  // Enhanced system audio source prioritization
+  prioritizeSystemAudioSources(sources) {
+    const audioSources = sources
+      .filter(source => {
+        // Include screen sources and specific application windows
+        return source.id.startsWith('screen:') || 
+               source.name.toLowerCase().includes('zoom') ||
+               source.name.toLowerCase().includes('audio') ||
+               source.name.toLowerCase().includes('system') ||
+               source.id.startsWith('window:');
+      })
+      .map(source => {
+        const baseSource = {
+          id: source.id,
+          name: source.name,
+          type: source.id.startsWith('screen:') ? 'screen' : 'window',
+          priority: 0
+        };
+
+        // Assign priority scores (higher = better)
+        if (baseSource.type === 'screen') {
+          baseSource.priority = 100; // Highest priority for screen sources
+          if (baseSource.name.toLowerCase().includes('main') || 
+              baseSource.name.toLowerCase().includes('primary')) {
+            baseSource.priority = 110; // Even higher for main/primary screens
+          }
+        } else if (baseSource.name.toLowerCase().includes('zoom meeting')) {
+          baseSource.priority = 90; // High priority for Zoom meeting windows
+        } else if (baseSource.name.toLowerCase().includes('zoom')) {
+          baseSource.priority = 80; // Medium-high priority for other Zoom windows
+        } else if (baseSource.name.toLowerCase().includes('system audio') ||
+                   baseSource.name.toLowerCase().includes('system sound')) {
+          baseSource.priority = 85; // High priority for system audio sources
+        } else if (baseSource.name.toLowerCase().includes('audio')) {
+          baseSource.priority = 70; // Medium priority for audio-related windows
+        } else {
+          baseSource.priority = 50; // Lower priority for other windows
+        }
+
+        return baseSource;
+      })
+      .sort((a, b) => b.priority - a.priority); // Sort by priority (highest first)
+
+    return audioSources;
+  }
+
   async requestPermissions() {
     try {
       const micStatus = await systemPreferences.askForMediaAccess('microphone');
@@ -370,12 +403,40 @@ class CloseFlowDesktop {
     try {
       this.systemAudioSources = await this.getDesktopAudioSources();
       
-      // Auto-select first source if none selected
-      if (!this.selectedSystemAudioSource && this.systemAudioSources.length > 0) {
-        this.selectedSystemAudioSource = this.systemAudioSources[0].id;
-      }
+      // Enhanced auto-selection logic
+      this.autoSelectSystemAudioSource();
     } catch (error) {
       console.error('Error loading system audio sources:', error);
+    }
+  }
+
+  // Enhanced auto-selection method
+  autoSelectSystemAudioSource() {
+    if (this.selectedSystemAudioSource && this.systemAudioSources.length > 0) {
+      // Check if currently selected source is still available
+      const currentSourceExists = this.systemAudioSources.find(s => s.id === this.selectedSystemAudioSource);
+      if (currentSourceExists) {
+        console.log('✅ Current system audio source still available:', currentSourceExists.name);
+        return; // Keep current selection
+      }
+    }
+
+    if (this.systemAudioSources.length === 0) {
+      console.log('⚠️ No system audio sources available');
+      this.selectedSystemAudioSource = null;
+      return;
+    }
+
+    // Find the best source based on priority
+    const bestSource = this.systemAudioSources[0]; // Already sorted by priority
+    this.selectedSystemAudioSource = bestSource.id;
+
+    if (bestSource.type === 'screen') {
+      console.log('🖥️ Auto-selected screen source for system audio:', bestSource.name);
+      console.log('✅ Screen sources are generally more compatible for system audio capture');
+    } else {
+      console.log('🪟 Auto-selected window source for system audio (no screen source found):', bestSource.name);
+      console.log('⚠️ Window sources may be less stable - consider using a screen source if available');
     }
   }
 
@@ -386,19 +447,7 @@ class CloseFlowDesktop {
         fetchWindowIcons: false
       });
 
-      return sources
-        .filter(source => {
-          return source.id.startsWith('screen:') || 
-                 source.name.toLowerCase().includes('zoom') ||
-                 source.name.toLowerCase().includes('audio') ||
-                 source.name.toLowerCase().includes('system') ||
-                 source.id.startsWith('window:');
-        })
-        .map(source => ({
-          id: source.id,
-          name: source.name,
-          type: source.id.startsWith('screen:') ? 'screen' : 'window'
-        }));
+      return this.prioritizeSystemAudioSources(sources);
     } catch (error) {
       console.error('Error getting desktop audio sources:', error);
       return [];
