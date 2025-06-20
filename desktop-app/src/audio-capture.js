@@ -7,6 +7,7 @@ class SystemAudioCapture {
     this.isCapturing = false;
     this.selectedSourceId = null;
     this.mainWindow = null;
+    this.debugMode = true; // Enable debug mode for testing
   }
 
   async initialize(sourceId, mainWindow) {
@@ -57,20 +58,28 @@ class SystemAudioCapture {
     try {
       console.log('🎤 Starting system audio capture...');
 
-      // Use the renderer process to capture audio since it has access to browser APIs
+      // STEP 1: Test desktopCapturer.getSources() independently
+      const testSources = await this.testDesktopCapturer();
+      if (!testSources) {
+        throw new Error('Failed to get desktop sources');
+      }
+
+      // STEP 2: Use the renderer process to capture audio with isolated testing
       const success = await this.mainWindow.webContents.executeJavaScript(`
         (async () => {
           try {
-            console.log('🎤 Starting audio capture in renderer process');
+            console.log('🎤 Starting ISOLATED audio capture test in renderer process');
             console.log('🔍 Selected source ID:', '${this.selectedSourceId}');
             
-            // Clean up any existing streams
+            // Clean up any existing streams first
             if (window.closeFlowSystemStream) {
+              console.log('🧹 Cleaning up existing stream');
               window.closeFlowSystemStream.getTracks().forEach(track => track.stop());
               window.closeFlowSystemStream = null;
             }
 
             if (window.closeFlowMediaRecorder) {
+              console.log('🧹 Cleaning up existing media recorder');
               if (window.closeFlowMediaRecorder.state !== 'inactive') {
                 window.closeFlowMediaRecorder.stop();
               }
@@ -78,10 +87,20 @@ class SystemAudioCapture {
             }
 
             console.log('🎤 About to call getUserMedia with source:', '${this.selectedSourceId}');
+            console.log('🎤 getUserMedia constraints:', {
+              audio: {
+                mandatory: {
+                  chromeMediaSource: 'desktop',
+                  chromeMediaSourceId: '${this.selectedSourceId}'
+                }
+              },
+              video: false
+            });
             
-            // Wrap getUserMedia in try-catch for better error handling
+            // ISOLATED TEST: Only getUserMedia, no MediaRecorder yet
             let stream;
             try {
+              const startTime = performance.now();
               stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                   mandatory: {
@@ -91,32 +110,70 @@ class SystemAudioCapture {
                 },
                 video: false
               });
-              console.log('✅ getUserMedia successful! Stream:', stream);
+              const endTime = performance.now();
+              console.log('✅ getUserMedia successful! Time taken:', (endTime - startTime), 'ms');
+              console.log('✅ Stream details:', {
+                id: stream.id,
+                active: stream.active,
+                audioTracks: stream.getAudioTracks().length,
+                videoTracks: stream.getVideoTracks().length
+              });
+              
+              // Log audio track details
+              stream.getAudioTracks().forEach((track, index) => {
+                console.log('🎵 Audio track', index, ':', {
+                  id: track.id,
+                  kind: track.kind,
+                  label: track.label,
+                  enabled: track.enabled,
+                  muted: track.muted,
+                  readyState: track.readyState,
+                  settings: track.getSettings()
+                });
+              });
+              
             } catch (getUserMediaError) {
               console.error('❌ getUserMedia failed:', getUserMediaError);
               console.error('❌ Error name:', getUserMediaError.name);
               console.error('❌ Error message:', getUserMediaError.message);
               console.error('❌ Error stack:', getUserMediaError.stack);
+              console.error('❌ Error toString:', getUserMediaError.toString());
               throw getUserMediaError;
             }
 
             window.closeFlowSystemStream = stream;
 
-            // Create MediaRecorder to capture audio data
-            const mediaRecorder = new MediaRecorder(stream, {
-              mimeType: 'audio/webm;codecs=opus',
-              audioBitsPerSecond: 16000
-            });
+            // STEP 3: Test MediaRecorder creation (but don't start it yet)
+            let mediaRecorder;
+            try {
+              console.log('🎤 Creating MediaRecorder...');
+              mediaRecorder = new MediaRecorder(stream, {
+                mimeType: 'audio/webm;codecs=opus',
+                audioBitsPerSecond: 16000
+              });
+              console.log('✅ MediaRecorder created successfully');
+              console.log('✅ MediaRecorder state:', mediaRecorder.state);
+              console.log('✅ MediaRecorder mimeType:', mediaRecorder.mimeType);
+            } catch (mediaRecorderError) {
+              console.error('❌ MediaRecorder creation failed:', mediaRecorderError);
+              throw mediaRecorderError;
+            }
 
             window.closeFlowMediaRecorder = mediaRecorder;
 
-            // Set up data handling
+            // Set up event handlers (but don't start recording yet)
             mediaRecorder.ondataavailable = (event) => {
               console.log('🎤 MediaRecorder data available, size:', event.data.size);
               
               // TEMPORARILY DISABLED: Comment out the IPC sending to isolate audio capture from IPC
+              // This helps us determine if the issue is with getUserMedia/MediaRecorder or with IPC
+              if (${this.debugMode}) {
+                console.log('🔍 DEBUG MODE: Not sending data via IPC to isolate the issue');
+                console.log('🔍 Data blob type:', event.data.type);
+                console.log('🔍 Data blob size:', event.data.size);
+              }
+              
               // if (event.data.size > 0 && window.electronAPI?.sendAudioData) {
-              //   // Send audio data via IPC to main process
               //   window.electronAPI.sendAudioData(event.data);
               // }
             };
@@ -129,12 +186,32 @@ class SystemAudioCapture {
               console.log('🛑 MediaRecorder stopped');
             };
 
-            // Start recording
-            console.log('🎤 Starting MediaRecorder...');
-            mediaRecorder.start(250); // Send data every 250ms
-            console.log('✅ MediaRecorder started successfully');
+            mediaRecorder.onstart = () => {
+              console.log('▶️ MediaRecorder started');
+            };
 
-            console.log('✅ System audio capture started successfully');
+            // STEP 4: Test starting MediaRecorder (this is where the issue might occur)
+            if (${this.debugMode}) {
+              console.log('🎤 DEBUG MODE: Starting MediaRecorder for 2 seconds only...');
+              try {
+                mediaRecorder.start(250); // Send data every 250ms
+                console.log('✅ MediaRecorder started successfully');
+                
+                // Stop after 2 seconds to test the full cycle
+                setTimeout(() => {
+                  if (mediaRecorder.state === 'recording') {
+                    console.log('🛑 DEBUG MODE: Stopping MediaRecorder after 2 seconds');
+                    mediaRecorder.stop();
+                  }
+                }, 2000);
+                
+              } catch (startError) {
+                console.error('❌ MediaRecorder start failed:', startError);
+                throw startError;
+              }
+            }
+
+            console.log('✅ System audio capture test completed successfully');
             return true;
 
           } catch (error) {
@@ -142,7 +219,8 @@ class SystemAudioCapture {
             console.error('❌ Error details:', {
               name: error.name,
               message: error.message,
-              stack: error.stack
+              stack: error.stack,
+              toString: error.toString()
             });
             return false;
           }
@@ -152,14 +230,15 @@ class SystemAudioCapture {
       if (success) {
         this.isCapturing = true;
 
-        // Notify WebSocket server that audio capture started
+        // Notify WebSocket server that audio capture started (but no actual data will be sent in debug mode)
         if (this.websocketConnection && this.websocketConnection.readyState === WebSocket.OPEN) {
           this.websocketConnection.send(JSON.stringify({
-            type: 'start-audio-capture'
+            type: 'start-audio-capture',
+            debugMode: this.debugMode
           }));
         }
 
-        console.log('✅ System audio capture started successfully');
+        console.log('✅ System audio capture test started successfully');
         return true;
       } else {
         throw new Error('Failed to start audio capture in renderer process');
@@ -168,6 +247,38 @@ class SystemAudioCapture {
     } catch (error) {
       console.error('❌ Failed to start system audio capture:', error);
       this.cleanup();
+      return false;
+    }
+  }
+
+  // New method to test desktopCapturer independently
+  async testDesktopCapturer() {
+    try {
+      console.log('🔍 Testing desktopCapturer.getSources()...');
+      const sources = await desktopCapturer.getSources({
+        types: ['window', 'screen'],
+        fetchWindowIcons: false
+      });
+
+      console.log('✅ desktopCapturer.getSources() successful');
+      console.log('📊 Found', sources.length, 'sources');
+      
+      // Find our selected source
+      const selectedSource = sources.find(source => source.id === this.selectedSourceId);
+      if (selectedSource) {
+        console.log('✅ Selected source found:', {
+          id: selectedSource.id,
+          name: selectedSource.name,
+          display_id: selectedSource.display_id
+        });
+      } else {
+        console.warn('⚠️ Selected source not found in current sources list');
+        console.log('Available sources:', sources.map(s => ({ id: s.id, name: s.name })));
+      }
+
+      return true;
+    } catch (error) {
+      console.error('❌ desktopCapturer.getSources() failed:', error);
       return false;
     }
   }
@@ -181,11 +292,16 @@ class SystemAudioCapture {
         (() => {
           try {
             if (window.closeFlowMediaRecorder && window.closeFlowMediaRecorder.state !== 'inactive') {
+              console.log('🛑 Stopping MediaRecorder...');
               window.closeFlowMediaRecorder.stop();
             }
             
             if (window.closeFlowSystemStream) {
-              window.closeFlowSystemStream.getTracks().forEach(track => track.stop());
+              console.log('🛑 Stopping audio tracks...');
+              window.closeFlowSystemStream.getTracks().forEach(track => {
+                console.log('🛑 Stopping track:', track.id, track.label);
+                track.stop();
+              });
               window.closeFlowSystemStream = null;
             }
             
@@ -212,8 +328,13 @@ class SystemAudioCapture {
     console.log('✅ System audio capture stopped');
   }
 
-  // Handle audio data from renderer process
+  // Handle audio data from renderer process (disabled in debug mode)
   handleAudioData(audioData) {
+    if (this.debugMode) {
+      console.log('🔍 DEBUG MODE: Received audio data but not forwarding to WebSocket');
+      return;
+    }
+
     if (this.websocketConnection && this.websocketConnection.readyState === WebSocket.OPEN) {
       this.websocketConnection.send(audioData);
     }
@@ -230,6 +351,18 @@ class SystemAudioCapture {
       this.websocketConnection.close();
       this.websocketConnection = null;
     }
+  }
+
+  // Method to disable debug mode and enable full functionality
+  disableDebugMode() {
+    console.log('🔧 Disabling debug mode - enabling full audio capture');
+    this.debugMode = false;
+  }
+
+  // Method to enable debug mode
+  enableDebugMode() {
+    console.log('🔧 Enabling debug mode - audio capture will be isolated');
+    this.debugMode = true;
   }
 }
 

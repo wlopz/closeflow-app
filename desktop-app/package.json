@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
+    "test-capturer": "electron test-desktop-capturer.js",
     "build": "electron-builder",
     "build:mac": "electron-builder --mac",
     "pack": "electron-builder --dir",

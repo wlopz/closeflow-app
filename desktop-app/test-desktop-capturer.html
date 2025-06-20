@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Desktop Capturer Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        #log {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Desktop Capturer Test</h1>
+        <p>This is a minimal test to isolate desktopCapturer and getUserMedia issues.</p>
+        
+        <div class="status info">
+            <strong>Test Status:</strong> Ready to test
+        </div>
+        
+        <button onclick="testDesktopSources()">Test Desktop Sources</button>
+        <button onclick="testGetUserMedia()">Test getUserMedia</button>
+        <button onclick="clearLog()">Clear Log</button>
+        
+        <h3>Console Log:</h3>
+        <div id="log"></div>
+    </div>
+
+    <script>
+        const { desktopCapturer } = require('electron');
+        let selectedSourceId = null;
+
+        function log(message) {
+            const logElement = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logElement.textContent += `[${timestamp}] ${message}\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+            console.log(message);
+        }
+
+        function clearLog() {
+            document.getElementById('log').textContent = '';
+        }
+
+        async function testDesktopSources() {
+            try {
+                log('🔍 Testing desktopCapturer.getSources()...');
+                
+                const sources = await desktopCapturer.getSources({
+                    types: ['window', 'screen'],
+                    fetchWindowIcons: false
+                });
+
+                log(`✅ Found ${sources.length} sources`);
+                
+                sources.forEach((source, index) => {
+                    log(`${index + 1}. ${source.name} (${source.id})`);
+                });
+
+                // Auto-select Zoom meeting if found
+                const zoomSource = sources.find(source => 
+                    source.name.toLowerCase().includes('zoom meeting') ||
+                    source.name.toLowerCase().includes('zoom.us')
+                );
+
+                if (zoomSource) {
+                    selectedSourceId = zoomSource.id;
+                    log(`🎯 Auto-selected Zoom source: ${zoomSource.name}`);
+                } else {
+                    const windowSource = sources.find(source => source.id.startsWith('window:'));
+                    if (windowSource) {
+                        selectedSourceId = windowSource.id;
+                        log(`📱 Auto-selected first window: ${windowSource.name}`);
+                    }
+                }
+
+            } catch (error) {
+                log(`❌ desktopCapturer failed: ${error.message}`);
+                console.error(error);
+            }
+        }
+
+        async function testGetUserMedia() {
+            if (!selectedSourceId) {
+                log('⚠️ No source selected. Run "Test Desktop Sources" first.');
+                return;
+            }
+
+            try {
+                log(`🎤 Testing getUserMedia with source: ${selectedSourceId}`);
+                
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        mandatory: {
+                            chromeMediaSource: 'desktop',
+                            chromeMediaSourceId: selectedSourceId
+                        }
+                    },
+                    video: false
+                });
+
+                log('✅ getUserMedia successful!');
+                log(`📊 Stream ID: ${stream.id}`);
+                log(`📊 Audio tracks: ${stream.getAudioTracks().length}`);
+                
+                stream.getAudioTracks().forEach((track, index) => {
+                    log(`🎵 Track ${index}: ${track.label} (${track.readyState})`);
+                });
+
+                // Test MediaRecorder
+                try {
+                    const mediaRecorder = new MediaRecorder(stream, {
+                        mimeType: 'audio/webm;codecs=opus'
+                    });
+                    log('✅ MediaRecorder created successfully');
+                    
+                    // Test starting/stopping
+                    mediaRecorder.start();
+                    log('✅ MediaRecorder started');
+                    
+                    setTimeout(() => {
+                        mediaRecorder.stop();
+                        log('✅ MediaRecorder stopped');
+                    }, 1000);
+                    
+                } catch (recorderError) {
+                    log(`❌ MediaRecorder failed: ${recorderError.message}`);
+                }
+
+                // Clean up
+                setTimeout(() => {
+                    stream.getTracks().forEach(track => track.stop());
+                    log('🧹 Stream cleaned up');
+                }, 2000);
+
+            } catch (error) {
+                log(`❌ getUserMedia failed: ${error.name} - ${error.message}`);
+                console.error(error);
+            }
+        }
+
+        // Auto-run tests when page loads
+        window.addEventListener('load', () => {
+            log('🚀 Desktop Capturer Test loaded');
+            log('📝 Check the main process console for additional logs');
+        });
+    </script>
+</body>
+</html>
