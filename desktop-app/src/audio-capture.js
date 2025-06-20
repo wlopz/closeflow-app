@@ -64,7 +64,7 @@ class SystemAudioCapture {
         throw new Error('Failed to get desktop sources');
       }
 
-      // Use the renderer process to capture audio with full functionality
+      // Use the renderer process to capture audio with optimized IPC
       const success = await this.mainWindow.webContents.executeJavaScript(`
         (async () => {
           try {
@@ -146,7 +146,7 @@ class SystemAudioCapture {
 
             window.closeFlowMediaRecorder = mediaRecorder;
 
-            // Set up data handling - FULL FUNCTIONALITY ENABLED
+            // Set up data handling - OPTIMIZED FOR IPC
             mediaRecorder.ondataavailable = (event) => {
               console.log('🎤 MediaRecorder data available, size:', event.data.size);
               
@@ -168,11 +168,12 @@ class SystemAudioCapture {
               console.log('▶️ MediaRecorder started');
             };
 
-            // Start recording continuously
+            // Start recording with optimized timing - REDUCED FREQUENCY
             console.log('🎤 Starting MediaRecorder for continuous capture...');
             try {
-              mediaRecorder.start(250); // Send data every 250ms
-              console.log('✅ MediaRecorder started successfully');
+              // OPTIMIZATION: Increased timeslice from 250ms to 1000ms to reduce IPC frequency
+              mediaRecorder.start(1000); // Send data every 1 second instead of 250ms
+              console.log('✅ MediaRecorder started successfully with 1-second intervals');
             } catch (startError) {
               console.error('❌ MediaRecorder start failed:', startError);
               throw startError;
