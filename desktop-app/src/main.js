@@ -338,7 +338,7 @@ class CloseFlowDesktop {
     }
   }
 
-  // Enhanced auto-selection method
+  // Enhanced auto-selection method with user notification
   autoSelectSystemAudioSource() {
     if (this.selectedSystemAudioSource && this.systemAudioSources.length > 0) {
       // Check if currently selected source is still available
@@ -365,6 +365,29 @@ class CloseFlowDesktop {
     } else {
       console.log('🪟 Auto-selected window source for system audio (no screen source found):', bestSource.name);
       console.log('⚠️ Window sources may be less stable - consider using a screen source if available');
+      
+      // NEW: Show user notification for window source selection
+      this.showWindowSourceWarning(bestSource);
+    }
+  }
+
+  // NEW: Show warning notification when window source is auto-selected
+  showWindowSourceWarning(windowSource) {
+    // Check if there are any screen sources available as alternatives
+    const screenSources = this.systemAudioSources.filter(source => source.type === 'screen');
+    
+    if (screenSources.length > 0) {
+      // Show notification suggesting screen source for better stability
+      this.showNotification(
+        'Audio Source Selection',
+        `Auto-selected window "${windowSource.name}". For better stability, consider selecting a "Screen" source from the dropdown menu.`
+      );
+    } else {
+      // Show notification explaining window source selection
+      this.showNotification(
+        'Audio Source Selection',
+        `Auto-selected window "${windowSource.name}". No screen sources available - this should work but may be less stable than screen capture.`
+      );
     }
   }
 
