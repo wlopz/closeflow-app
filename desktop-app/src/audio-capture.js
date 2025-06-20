@@ -58,14 +58,10 @@ class SystemAudioCapture {
     try {
       console.log('🎤 Starting system audio capture...');
 
-      // Test desktopCapturer.getSources() independently
-      const testSources = await this.testDesktopCapturer();
-      if (!testSources) {
-        throw new Error('Failed to get desktop sources');
-      }
+      // REMOVED: Redundant desktop source testing that could cause issues
+      // The selectedSourceId is already determined and passed from main process
 
-      // NEW APPROACH: Use renderer process to connect directly to WebSocket
-      // This bypasses the problematic IPC audio transfer
+      // Enhanced renderer-based audio capture with timing improvements
       const success = await this.mainWindow.webContents.executeJavaScript(`
         (async () => {
           try {
@@ -112,7 +108,20 @@ class SystemAudioCapture {
               setTimeout(() => reject(new Error('WebSocket connection timeout')), 5000);
             });
 
-            console.log('🎤 Getting audio stream from source:', '${this.selectedSourceId}');
+            // ENHANCEMENT: Add small delay before getUserMedia to prevent race conditions
+            console.log('⏱️ Adding initialization delay...');
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            console.log('🎤 About to call getUserMedia with source:', '${this.selectedSourceId}');
+            console.log('🎤 getUserMedia constraints:', {
+              audio: {
+                mandatory: {
+                  chromeMediaSource: 'desktop',
+                  chromeMediaSourceId: '${this.selectedSourceId}'
+                }
+              },
+              video: false
+            });
             
             // Get the audio stream from the selected source
             const stream = await navigator.mediaDevices.getUserMedia({
@@ -125,10 +134,30 @@ class SystemAudioCapture {
               video: false
             });
 
-            console.log('✅ Audio stream obtained successfully');
+            console.log('✅ getUserMedia completed successfully');
+            console.log('📊 Stream details:', {
+              id: stream.id,
+              active: stream.active,
+              audioTracks: stream.getAudioTracks().length
+            });
+            
             window.closeFlowSystemStream = stream;
 
+            // Verify audio tracks
+            const audioTracks = stream.getAudioTracks();
+            if (audioTracks.length === 0) {
+              throw new Error('No audio tracks found in stream');
+            }
+            
+            console.log('🎵 Audio track details:', audioTracks.map(track => ({
+              id: track.id,
+              label: track.label,
+              enabled: track.enabled,
+              readyState: track.readyState
+            })));
+
             // Create MediaRecorder to capture audio data
+            console.log('🎬 Creating MediaRecorder...');
             const mediaRecorder = new MediaRecorder(stream, {
               mimeType: 'audio/webm;codecs=opus',
               audioBitsPerSecond: 16000
@@ -158,14 +187,19 @@ class SystemAudioCapture {
             };
 
             // Start recording with optimized timing
-            console.log('🎤 Starting MediaRecorder...');
-            mediaRecorder.start(1000); // 1-second chunks
+            console.log('🎤 Starting MediaRecorder with 1-second chunks...');
+            mediaRecorder.start(1000); // 1-second chunks for better performance
 
             console.log('✅ DIRECT WebSocket audio capture started successfully');
             return true;
 
           } catch (error) {
             console.error('❌ Failed to start direct WebSocket audio capture:', error);
+            console.error('❌ Error details:', {
+              name: error.name,
+              message: error.message,
+              stack: error.stack
+            });
             return false;
           }
         })()
@@ -194,45 +228,16 @@ class SystemAudioCapture {
     }
   }
 
-  // Test desktopCapturer independently
-  async testDesktopCapturer() {
-    try {
-      console.log('🔍 Testing desktopCapturer.getSources()...');
-      const sources = await desktopCapturer.getSources({
-        types: ['window', 'screen'],
-        fetchWindowIcons: false
-      });
-
-      console.log('✅ desktopCapturer.getSources() successful');
-      console.log('📊 Found', sources.length, 'sources');
-      
-      // Find our selected source
-      const selectedSource = sources.find(source => source.id === this.selectedSourceId);
-      if (selectedSource) {
-        console.log('✅ Selected source found:', {
-          id: selectedSource.id,
-          name: selectedSource.name,
-          display_id: selectedSource.display_id
-        });
-      } else {
-        console.warn('⚠️ Selected source not found in current sources list');
-      }
-
-      return true;
-    } catch (error) {
-      console.error('❌ desktopCapturer.getSources() failed:', error);
-      return false;
-    }
-  }
-
   stopCapture() {
     console.log('🛑 Stopping system audio capture...');
 
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      // Stop recording in renderer process
+      // Stop recording in renderer process with enhanced error handling
       this.mainWindow.webContents.executeJavaScript(`
         (() => {
           try {
+            console.log('🛑 Starting cleanup in renderer...');
+            
             if (window.closeFlowMediaRecorder && window.closeFlowMediaRecorder.state !== 'inactive') {
               console.log('🛑 Stopping MediaRecorder...');
               window.closeFlowMediaRecorder.stop();
@@ -241,6 +246,7 @@ class SystemAudioCapture {
             if (window.closeFlowSystemStream) {
               console.log('🛑 Stopping audio tracks...');
               window.closeFlowSystemStream.getTracks().forEach(track => {
+                console.log('🛑 Stopping track:', track.id, track.label);
                 track.stop();
               });
               window.closeFlowSystemStream = null;
@@ -253,13 +259,14 @@ class SystemAudioCapture {
             }
             
             window.closeFlowMediaRecorder = null;
-            console.log('✅ Audio capture stopped in renderer');
+            console.log('✅ Audio capture cleanup completed in renderer');
+            
           } catch (error) {
-            console.error('Error stopping audio capture:', error);
+            console.error('❌ Error during renderer cleanup:', error);
           }
         })()
       `).catch(err => {
-        // Ignore errors during shutdown
+        // Ignore errors during shutdown - renderer might be gone
         console.log('Note: Error stopping audio capture (likely during shutdown):', err.message);
       });
     }
