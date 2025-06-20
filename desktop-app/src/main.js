@@ -127,24 +127,17 @@ class CloseFlowDesktop {
   }
 
   setupRendererAPI() {
-    // Wait for renderer to be ready, then expose API
+    // SIMPLIFIED: No longer need complex audio IPC since we use direct WebSocket
     if (this.isRendererSafe()) {
       this.mainWindow.webContents.executeJavaScript(`
+        // Simplified API - no audio IPC needed
         window.electronAPI = {
+          // Keep this for potential future use, but audio now goes directly via WebSocket
           sendAudioData: (audioData) => {
-            // OPTIMIZATION: Send ArrayBuffer directly instead of converting to array
-            if (audioData instanceof Blob) {
-              audioData.arrayBuffer().then(buffer => {
-                const { ipcRenderer } = require('electron');
-                // Send ArrayBuffer directly - more efficient than array conversion
-                ipcRenderer.send('audio-data', buffer);
-              }).catch(err => {
-                console.error('Error converting audio data:', err);
-              });
-            }
+            console.log('⚠️ sendAudioData called but audio now uses direct WebSocket');
           }
         };
-        console.log('✅ Electron API exposed to renderer');
+        console.log('✅ Simplified Electron API exposed to renderer');
       `).catch(err => {
         console.error('Error setting up renderer API:', err);
         this.rendererReady = false;
@@ -152,75 +145,9 @@ class CloseFlowDesktop {
     }
   }
 
-  setupTray() {
-    try {
-      const iconPath = path.join(__dirname, '../assets/tray-icon.png');
-      const fs = require('fs');
-      
-      if (!fs.existsSync(iconPath)) {
-        console.log('Tray icon not found, skipping tray setup');
-        return;
-      }
-
-      this.tray = new Tray(iconPath);
-      this.updateTrayMenu();
-      this.tray.setToolTip('CloseFlow Desktop');
-      
-      this.tray.on('click', () => {
-        this.mainWindow.isVisible() ? this.mainWindow.hide() : this.mainWindow.show();
-      });
-    } catch (error) {
-      console.log('Tray setup failed:', error.message);
-    }
-  }
-
-  updateTrayMenu() {
-    if (!this.tray) return;
-
-    try {
-      const menuTemplate = [
-        {
-          label: 'Show CloseFlow',
-          click: () => {
-            this.mainWindow.show();
-            this.mainWindow.focus();
-          }
-        },
-        {
-          label: this.isCallActive ? 'Call Analysis Active' : 'Start Call Analysis',
-          enabled: this.isZoomDetected && !this.isCallActive && this.isConnected && !this.isStartingCall,
-          click: () => this.startCallAnalysis()
-        },
-        { type: 'separator' },
-        {
-          label: 'Quit',
-          click: () => {
-            app.isQuiting = true;
-            app.quit();
-          }
-        }
-      ];
-
-      this.trayMenu = Menu.buildFromTemplate(menuTemplate);
-      this.tray.setContextMenu(this.trayMenu);
-    } catch (error) {
-      console.log('Error updating tray menu:', error.message);
-    }
-  }
-
   setupIPC() {
-    // OPTIMIZATION: Handle audio data as ArrayBuffer instead of array
-    ipcMain.on('audio-data', (event, audioBuffer) => {
-      try {
-        if (this.systemAudioCapture && audioBuffer instanceof ArrayBuffer) {
-          // Convert ArrayBuffer to Node.js Buffer more efficiently
-          const nodeBuffer = Buffer.from(audioBuffer);
-          this.systemAudioCapture.handleAudioData(nodeBuffer);
-        }
-      } catch (error) {
-        console.error('Error handling audio data:', error);
-      }
-    });
+    // SIMPLIFIED: Remove audio IPC handler since we use direct WebSocket
+    // Keep other IPC handlers for device selection, etc.
 
     ipcMain.handle('start-call-analysis', async (event, options = {}) => {
       try {
@@ -1027,7 +954,7 @@ class CloseFlowDesktop {
         throw new Error('Failed to initialize system audio capture');
       }
 
-      // Start system audio capture
+      // Start system audio capture (now uses direct WebSocket)
       const captureStarted = await this.systemAudioCapture.startCapture();
       if (!captureStarted) {
         throw new Error('Failed to start system audio capture');
@@ -1185,6 +1112,62 @@ class CloseFlowDesktop {
       });
       
       throw error;
+    }
+  }
+
+  setupTray() {
+    try {
+      const iconPath = path.join(__dirname, '../assets/tray-icon.png');
+      const fs = require('fs');
+      
+      if (!fs.existsSync(iconPath)) {
+        console.log('Tray icon not found, skipping tray setup');
+        return;
+      }
+
+      this.tray = new Tray(iconPath);
+      this.updateTrayMenu();
+      this.tray.setToolTip('CloseFlow Desktop');
+      
+      this.tray.on('click', () => {
+        this.mainWindow.isVisible() ? this.mainWindow.hide() : this.mainWindow.show();
+      });
+    } catch (error) {
+      console.log('Tray setup failed:', error.message);
+    }
+  }
+
+  updateTrayMenu() {
+    if (!this.tray) return;
+
+    try {
+      const menuTemplate = [
+        {
+          label: 'Show CloseFlow',
+          click: () => {
+            this.mainWindow.show();
+            this.mainWindow.focus();
+          }
+        },
+        {
+          label: this.isCallActive ? 'Call Analysis Active' : 'Start Call Analysis',
+          enabled: this.isZoomDetected && !this.isCallActive && this.isConnected && !this.isStartingCall,
+          click: () => this.startCallAnalysis()
+        },
+        { type: 'separator' },
+        {
+          label: 'Quit',
+          click: () => {
+            app.isQuiting = true;
+            app.quit();
+          }
+        }
+      ];
+
+      this.trayMenu = Menu.buildFromTemplate(menuTemplate);
+      this.tray.setContextMenu(this.trayMenu);
+    } catch (error) {
+      console.log('Error updating tray menu:', error.message);
     }
   }
 

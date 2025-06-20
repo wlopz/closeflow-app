@@ -6,6 +6,7 @@ class AudioWebSocketServer {
     this.server = null;
     this.webAppConnection = null;
     this.desktopConnection = null;
+    this.desktopRendererConnection = null; // NEW: Direct renderer connection
     this.deepgramConnection = null;
     this.audioStream = null;
     this.isRecording = false;
@@ -22,23 +23,29 @@ class AudioWebSocketServer {
     });
 
     this.server.on('connection', (ws, req) => {
-      const clientType = req.url?.includes('web-app') ? 'web-app' : 'desktop';
+      const clientType = this.getClientType(req.url);
       console.log(`📱 ${clientType} connected to WebSocket server`);
 
       if (clientType === 'web-app') {
         this.webAppConnection = ws;
         this.setupWebAppConnection(ws);
-      } else {
+      } else if (clientType === 'desktop') {
         this.desktopConnection = ws;
         this.setupDesktopConnection(ws);
+      } else if (clientType === 'desktop-renderer') {
+        // NEW: Handle direct renderer connections
+        this.desktopRendererConnection = ws;
+        this.setupDesktopRendererConnection(ws);
       }
 
       ws.on('close', () => {
         console.log(`📱 ${clientType} disconnected from WebSocket server`);
         if (clientType === 'web-app') {
           this.webAppConnection = null;
-        } else {
+        } else if (clientType === 'desktop') {
           this.desktopConnection = null;
+        } else if (clientType === 'desktop-renderer') {
+          this.desktopRendererConnection = null;
         }
         this.cleanup();
       });
@@ -53,6 +60,12 @@ class AudioWebSocketServer {
     });
 
     console.log('✅ Audio WebSocket Server started successfully');
+  }
+
+  getClientType(url) {
+    if (url?.includes('web-app')) return 'web-app';
+    if (url?.includes('desktop-renderer')) return 'desktop-renderer';
+    return 'desktop';
   }
 
   setupWebAppConnection(ws) {
@@ -81,30 +94,46 @@ class AudioWebSocketServer {
   setupDesktopConnection(ws) {
     ws.on('message', (data) => {
       try {
+        // This is for control messages from main process
+        const message = JSON.parse(data);
+        console.log('📨 Received message from desktop main process:', message.type);
+
+        switch (message.type) {
+          case 'start-audio-capture':
+            this.isRecording = true;
+            console.log('🎤 Desktop main process notified audio capture started');
+            break;
+          case 'stop-audio-capture':
+            this.isRecording = false;
+            console.log('🛑 Desktop main process notified audio capture stopped');
+            this.stopDeepgramConnection();
+            break;
+        }
+      } catch (error) {
+        console.error('❌ Error handling desktop main process message:', error);
+      }
+    });
+  }
+
+  // NEW: Handle direct renderer connections
+  setupDesktopRendererConnection(ws) {
+    ws.on('message', (data) => {
+      try {
         if (data instanceof Buffer) {
-          // This is audio data from desktop app
+          // This is audio data from desktop renderer - DIRECT TRANSFER
+          console.log('🎤 Received audio data directly from renderer, size:', data.length);
+          
           if (this.deepgramConnection && this.deepgramConnection.readyState === WebSocket.OPEN) {
+            // Forward directly to Deepgram
             this.deepgramConnection.send(data);
           }
         } else {
-          // This is a control message
+          // This might be a control message
           const message = JSON.parse(data);
-          console.log('📨 Received message from desktop:', message.type);
-
-          switch (message.type) {
-            case 'start-audio-capture':
-              this.isRecording = true;
-              console.log('🎤 Started receiving audio from desktop');
-              break;
-            case 'stop-audio-capture':
-              this.isRecording = false;
-              console.log('🛑 Stopped receiving audio from desktop');
-              this.stopDeepgramConnection();
-              break;
-          }
+          console.log('📨 Received message from desktop renderer:', message.type);
         }
       } catch (error) {
-        console.error('❌ Error handling desktop message:', error);
+        console.error('❌ Error handling desktop renderer message:', error);
       }
     });
   }

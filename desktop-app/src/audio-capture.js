@@ -7,7 +7,7 @@ class SystemAudioCapture {
     this.isCapturing = false;
     this.selectedSourceId = null;
     this.mainWindow = null;
-    this.debugMode = false; // Disable debug mode for full functionality
+    this.debugMode = false;
   }
 
   async initialize(sourceId, mainWindow) {
@@ -16,19 +16,19 @@ class SystemAudioCapture {
     this.mainWindow = mainWindow;
 
     try {
-      // Connect to local WebSocket server
+      // Connect to local WebSocket server from main process
       this.websocketConnection = new WebSocket('ws://localhost:8080/desktop');
       
       this.websocketConnection.on('open', () => {
-        console.log('✅ Connected to local WebSocket server');
+        console.log('✅ Main process connected to local WebSocket server');
       });
 
       this.websocketConnection.on('error', (error) => {
-        console.error('❌ WebSocket connection error:', error);
+        console.error('❌ Main process WebSocket connection error:', error);
       });
 
       this.websocketConnection.on('close', () => {
-        console.log('🔗 WebSocket connection closed');
+        console.log('🔗 Main process WebSocket connection closed');
         this.websocketConnection = null;
       });
 
@@ -64,14 +64,15 @@ class SystemAudioCapture {
         throw new Error('Failed to get desktop sources');
       }
 
-      // Use the renderer process to capture audio with optimized IPC
+      // NEW APPROACH: Use renderer process to connect directly to WebSocket
+      // This bypasses the problematic IPC audio transfer
       const success = await this.mainWindow.webContents.executeJavaScript(`
         (async () => {
           try {
-            console.log('🎤 Starting system audio capture in renderer process');
+            console.log('🎤 Starting DIRECT WebSocket audio capture in renderer process');
             console.log('🔍 Selected source ID:', '${this.selectedSourceId}');
             
-            // Clean up any existing streams first
+            // Clean up any existing streams and connections
             if (window.closeFlowSystemStream) {
               console.log('🧹 Cleaning up existing stream');
               window.closeFlowSystemStream.getTracks().forEach(track => track.stop());
@@ -86,73 +87,61 @@ class SystemAudioCapture {
               window.closeFlowMediaRecorder = null;
             }
 
-            console.log('🎤 About to call getUserMedia with source:', '${this.selectedSourceId}');
-            
-            // Get the audio stream from the selected source using desktopCapturer
-            let stream;
-            try {
-              const startTime = performance.now();
-              stream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                  mandatory: {
-                    chromeMediaSource: 'desktop',
-                    chromeMediaSourceId: '${this.selectedSourceId}'
-                  }
-                },
-                video: false
-              });
-              const endTime = performance.now();
-              console.log('✅ getUserMedia successful! Time taken:', (endTime - startTime), 'ms');
-              console.log('✅ Stream details:', {
-                id: stream.id,
-                active: stream.active,
-                audioTracks: stream.getAudioTracks().length,
-                videoTracks: stream.getVideoTracks().length
-              });
-              
-              // Log audio track details
-              stream.getAudioTracks().forEach((track, index) => {
-                console.log('🎵 Audio track', index, ':', {
-                  id: track.id,
-                  kind: track.kind,
-                  label: track.label,
-                  enabled: track.enabled,
-                  muted: track.muted,
-                  readyState: track.readyState,
-                  settings: track.getSettings()
-                });
-              });
-              
-            } catch (getUserMediaError) {
-              console.error('❌ getUserMedia failed:', getUserMediaError);
-              throw getUserMediaError;
+            if (window.closeFlowWebSocket) {
+              console.log('🧹 Cleaning up existing WebSocket');
+              window.closeFlowWebSocket.close();
+              window.closeFlowWebSocket = null;
             }
 
+            // CRITICAL: Connect directly to WebSocket from renderer
+            console.log('🔗 Connecting renderer directly to WebSocket server...');
+            const ws = new WebSocket('ws://localhost:8080/desktop-renderer');
+            window.closeFlowWebSocket = ws;
+
+            // Wait for WebSocket connection
+            await new Promise((resolve, reject) => {
+              ws.onopen = () => {
+                console.log('✅ Renderer connected directly to WebSocket server');
+                resolve();
+              };
+              ws.onerror = (error) => {
+                console.error('❌ Renderer WebSocket connection failed:', error);
+                reject(error);
+              };
+              // Timeout after 5 seconds
+              setTimeout(() => reject(new Error('WebSocket connection timeout')), 5000);
+            });
+
+            console.log('🎤 Getting audio stream from source:', '${this.selectedSourceId}');
+            
+            // Get the audio stream from the selected source
+            const stream = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                mandatory: {
+                  chromeMediaSource: 'desktop',
+                  chromeMediaSourceId: '${this.selectedSourceId}'
+                }
+              },
+              video: false
+            });
+
+            console.log('✅ Audio stream obtained successfully');
             window.closeFlowSystemStream = stream;
 
             // Create MediaRecorder to capture audio data
-            let mediaRecorder;
-            try {
-              console.log('🎤 Creating MediaRecorder...');
-              mediaRecorder = new MediaRecorder(stream, {
-                mimeType: 'audio/webm;codecs=opus',
-                audioBitsPerSecond: 16000
-              });
-              console.log('✅ MediaRecorder created successfully');
-            } catch (mediaRecorderError) {
-              console.error('❌ MediaRecorder creation failed:', mediaRecorderError);
-              throw mediaRecorderError;
-            }
+            const mediaRecorder = new MediaRecorder(stream, {
+              mimeType: 'audio/webm;codecs=opus',
+              audioBitsPerSecond: 16000
+            });
 
             window.closeFlowMediaRecorder = mediaRecorder;
 
-            // Set up data handling - OPTIMIZED FOR IPC
+            // DIRECT WebSocket TRANSFER - NO IPC!
             mediaRecorder.ondataavailable = (event) => {
-              console.log('🎤 MediaRecorder data available, size:', event.data.size);
-              
-              if (event.data.size > 0 && window.electronAPI?.sendAudioData) {
-                // Send audio data via IPC to main process
-                window.electronAPI.sendAudioData(event.data);
+              if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+                console.log('🎤 Sending audio data directly via WebSocket, size:', event.data.size);
+                // Send binary data directly to WebSocket - NO IPC INVOLVED
+                ws.send(event.data);
               }
             };
 
@@ -168,22 +157,15 @@ class SystemAudioCapture {
               console.log('▶️ MediaRecorder started');
             };
 
-            // Start recording with optimized timing - REDUCED FREQUENCY
-            console.log('🎤 Starting MediaRecorder for continuous capture...');
-            try {
-              // OPTIMIZATION: Increased timeslice from 250ms to 1000ms to reduce IPC frequency
-              mediaRecorder.start(1000); // Send data every 1 second instead of 250ms
-              console.log('✅ MediaRecorder started successfully with 1-second intervals');
-            } catch (startError) {
-              console.error('❌ MediaRecorder start failed:', startError);
-              throw startError;
-            }
+            // Start recording with optimized timing
+            console.log('🎤 Starting MediaRecorder...');
+            mediaRecorder.start(1000); // 1-second chunks
 
-            console.log('✅ System audio capture started successfully');
+            console.log('✅ DIRECT WebSocket audio capture started successfully');
             return true;
 
           } catch (error) {
-            console.error('❌ Failed to start system audio capture:', error);
+            console.error('❌ Failed to start direct WebSocket audio capture:', error);
             return false;
           }
         })()
@@ -192,17 +174,17 @@ class SystemAudioCapture {
       if (success) {
         this.isCapturing = true;
 
-        // Notify WebSocket server that audio capture started
+        // Notify main process WebSocket that audio capture started
         if (this.websocketConnection && this.websocketConnection.readyState === WebSocket.OPEN) {
           this.websocketConnection.send(JSON.stringify({
             type: 'start-audio-capture'
           }));
         }
 
-        console.log('✅ System audio capture started successfully');
+        console.log('✅ System audio capture started successfully with DIRECT WebSocket');
         return true;
       } else {
-        throw new Error('Failed to start audio capture in renderer process');
+        throw new Error('Failed to start direct WebSocket audio capture in renderer process');
       }
 
     } catch (error) {
@@ -234,7 +216,6 @@ class SystemAudioCapture {
         });
       } else {
         console.warn('⚠️ Selected source not found in current sources list');
-        console.log('Available sources:', sources.map(s => ({ id: s.id, name: s.name })));
       }
 
       return true;
@@ -260,10 +241,15 @@ class SystemAudioCapture {
             if (window.closeFlowSystemStream) {
               console.log('🛑 Stopping audio tracks...');
               window.closeFlowSystemStream.getTracks().forEach(track => {
-                console.log('🛑 Stopping track:', track.id, track.label);
                 track.stop();
               });
               window.closeFlowSystemStream = null;
+            }
+
+            if (window.closeFlowWebSocket) {
+              console.log('🛑 Closing renderer WebSocket...');
+              window.closeFlowWebSocket.close();
+              window.closeFlowWebSocket = null;
             }
             
             window.closeFlowMediaRecorder = null;
@@ -278,7 +264,7 @@ class SystemAudioCapture {
       });
     }
 
-    // Notify WebSocket server that audio capture stopped
+    // Notify main process WebSocket that audio capture stopped
     if (this.websocketConnection && this.websocketConnection.readyState === WebSocket.OPEN) {
       this.websocketConnection.send(JSON.stringify({
         type: 'stop-audio-capture'
@@ -289,11 +275,10 @@ class SystemAudioCapture {
     console.log('✅ System audio capture stopped');
   }
 
-  // Handle audio data from renderer process
+  // This method is no longer needed since we're using direct WebSocket
   handleAudioData(audioData) {
-    if (this.websocketConnection && this.websocketConnection.readyState === WebSocket.OPEN) {
-      this.websocketConnection.send(audioData);
-    }
+    // This method is now obsolete - audio goes directly via WebSocket from renderer
+    console.log('⚠️ handleAudioData called but audio now goes directly via WebSocket');
   }
 
   cleanup() {
