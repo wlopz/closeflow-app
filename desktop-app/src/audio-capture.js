@@ -58,10 +58,7 @@ class SystemAudioCapture {
     try {
       console.log('🎤 Starting system audio capture...');
 
-      // REMOVED: Redundant desktop source testing that could cause issues
-      // The selectedSourceId is already determined and passed from main process
-
-      // Enhanced renderer-based audio capture with timing improvements
+      // Enhanced renderer-based audio capture with simplified MediaRecorder options
       const success = await this.mainWindow.webContents.executeJavaScript(`
         (async () => {
           try {
@@ -156,12 +153,15 @@ class SystemAudioCapture {
               readyState: track.readyState
             })));
 
-            // Create MediaRecorder to capture audio data
-            console.log('🎬 Creating MediaRecorder...');
-            const mediaRecorder = new MediaRecorder(stream, {
-              mimeType: 'audio/webm;codecs=opus',
-              audioBitsPerSecond: 16000
-            });
+            // CRITICAL FIX: Create MediaRecorder with NO specific options to avoid compatibility issues
+            console.log('🎬 Creating MediaRecorder with default options...');
+            console.log('🔧 Using browser default settings for maximum compatibility');
+            
+            // Let the browser choose the best format automatically
+            const mediaRecorder = new MediaRecorder(stream);
+            
+            console.log('✅ MediaRecorder created successfully with default options');
+            console.log('📊 MediaRecorder mimeType:', mediaRecorder.mimeType);
 
             window.closeFlowMediaRecorder = mediaRecorder;
 
@@ -186,10 +186,13 @@ class SystemAudioCapture {
               console.log('▶️ MediaRecorder started');
             };
 
-            // Start recording with optimized timing
-            console.log('🎤 Starting MediaRecorder with 1-second chunks...');
+            // CRITICAL: Start recording with optimized timing and add extra logging
+            console.log('🎤 About to start MediaRecorder...');
+            console.log('📊 MediaRecorder state before start:', mediaRecorder.state);
+            
             mediaRecorder.start(1000); // 1-second chunks for better performance
-
+            
+            console.log('📊 MediaRecorder state after start:', mediaRecorder.state);
             console.log('✅ DIRECT WebSocket audio capture started successfully');
             return true;
 
@@ -215,7 +218,7 @@ class SystemAudioCapture {
           }));
         }
 
-        console.log('✅ System audio capture started successfully with DIRECT WebSocket');
+        console.log('✅ System audio capture started successfully with DIRECT WebSocket and default MediaRecorder options');
         return true;
       } else {
         throw new Error('Failed to start direct WebSocket audio capture in renderer process');
