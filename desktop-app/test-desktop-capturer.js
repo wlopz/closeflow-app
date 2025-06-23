@@ -71,15 +71,18 @@ class DesktopCapturerTest {
         try {
           console.log('🎤 Testing getUserMedia in renderer...');
           
-          const stream = await navigator.mediaDevices.getUserMedia({
+          // FIXED: Use the supported getUserMedia API format
+          const constraints = {
             audio: {
-              mandatory: {
-                chromeMediaSource: 'desktop',
-                chromeMediaSourceId: '${sourceId}'
-              }
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: '${sourceId}'
             },
             video: false
-          });
+          };
+          
+          console.log('🎤 Using constraints:', constraints);
+          
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
           console.log('✅ getUserMedia successful!');
           console.log('Stream:', stream);

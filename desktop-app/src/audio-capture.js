@@ -58,7 +58,7 @@ class SystemAudioCapture {
     try {
       console.log('🎤 Starting system audio capture...');
 
-      // Enhanced renderer-based audio capture with simplified MediaRecorder options
+      // Enhanced renderer-based audio capture with fixed getUserMedia constraints
       const success = await this.mainWindow.webContents.executeJavaScript(`
         (async () => {
           try {
@@ -110,26 +110,20 @@ class SystemAudioCapture {
             await new Promise(resolve => setTimeout(resolve, 100));
 
             console.log('🎤 About to call getUserMedia with source:', '${this.selectedSourceId}');
-            console.log('🎤 getUserMedia constraints:', {
-              audio: {
-                mandatory: {
-                  chromeMediaSource: 'desktop',
-                  chromeMediaSourceId: '${this.selectedSourceId}'
-                }
-              },
-              video: false
-            });
             
-            // Get the audio stream from the selected source
-            const stream = await navigator.mediaDevices.getUserMedia({
+            // FIXED: Use the supported getUserMedia API format
+            const constraints = {
               audio: {
-                mandatory: {
-                  chromeMediaSource: 'desktop',
-                  chromeMediaSourceId: '${this.selectedSourceId}'
-                }
+                chromeMediaSource: 'desktop',
+                chromeMediaSourceId: '${this.selectedSourceId}'
               },
               video: false
-            });
+            };
+            
+            console.log('🎤 getUserMedia constraints:', constraints);
+            
+            // Get the audio stream from the selected source using the correct API
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
             console.log('✅ getUserMedia completed successfully');
             console.log('📊 Stream details:', {
@@ -218,7 +212,7 @@ class SystemAudioCapture {
           }));
         }
 
-        console.log('✅ System audio capture started successfully with DIRECT WebSocket and default MediaRecorder options');
+        console.log('✅ System audio capture started successfully with DIRECT WebSocket and fixed getUserMedia API');
         return true;
       } else {
         throw new Error('Failed to start direct WebSocket audio capture in renderer process');

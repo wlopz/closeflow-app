@@ -73,7 +73,7 @@
         <p>This is a minimal test to isolate desktopCapturer and getUserMedia issues.</p>
         
         <div class="status info">
-            <strong>Test Status:</strong> Ready to test
+            <strong>Test Status:</strong> Ready to test with fixed getUserMedia API
         </div>
         
         <button onclick="testDesktopSources()">Test Desktop Sources</button>
@@ -147,15 +147,19 @@
             try {
                 log(`🎤 Testing getUserMedia with source: ${selectedSourceId}`);
                 
-                const stream = await navigator.mediaDevices.getUserMedia({
+                // FIXED: Use the supported getUserMedia API format
+                const constraints = {
                     audio: {
-                        mandatory: {
-                            chromeMediaSource: 'desktop',
-                            chromeMediaSourceId: selectedSourceId
-                        }
+                        chromeMediaSource: 'desktop',
+                        chromeMediaSourceId: selectedSourceId
                     },
                     video: false
-                });
+                };
+                
+                log('🎤 Using fixed constraints (no mandatory wrapper)');
+                console.log('Constraints:', constraints);
+                
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
                 log('✅ getUserMedia successful!');
                 log(`📊 Stream ID: ${stream.id}`);
@@ -167,9 +171,7 @@
 
                 // Test MediaRecorder
                 try {
-                    const mediaRecorder = new MediaRecorder(stream, {
-                        mimeType: 'audio/webm;codecs=opus'
-                    });
+                    const mediaRecorder = new MediaRecorder(stream);
                     log('✅ MediaRecorder created successfully');
                     
                     // Test starting/stopping
@@ -199,8 +201,9 @@
 
         // Auto-run tests when page loads
         window.addEventListener('load', () => {
-            log('🚀 Desktop Capturer Test loaded');
+            log('🚀 Desktop Capturer Test loaded with fixed getUserMedia API');
             log('📝 Check the main process console for additional logs');
+            log('🔧 Now using supported API format without mandatory wrapper');
         });
     </script>
 </body>
