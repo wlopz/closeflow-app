@@ -86,17 +86,42 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         const data = await response.json();
         setDesktopConnected(data.connected);
         
+        // ENHANCED LOGGING: Show pending messages count
+        console.log('🔍 PENDING MESSAGES DEBUG: Checking desktop status');
+        console.log('🔍 PENDING MESSAGES DEBUG: Connected:', data.connected);
+        console.log('🔍 PENDING MESSAGES DEBUG: Pending messages count:', data.pendingMessages);
+        console.log('🔍 PENDING MESSAGES DEBUG: Call active:', data.callActive);
+        console.log('🔍 PENDING MESSAGES DEBUG: Full response data:', data);
+        
         // Check for pending messages from desktop
         if (data.connected && data.pendingMessages > 0) {
+          console.log('📨 PENDING MESSAGES DEBUG: Found pending messages, fetching them...');
+          console.log('📨 PENDING MESSAGES DEBUG: About to fetch from /api/desktop-sync?action=get-messages');
+          
           const messagesResponse = await fetch('/api/desktop-sync?action=get-messages');
           const messagesData = await messagesResponse.json();
           
+          console.log('📨 PENDING MESSAGES DEBUG: Messages response status:', messagesResponse.status);
+          console.log('📨 PENDING MESSAGES DEBUG: Messages response ok:', messagesResponse.ok);
+          console.log('📨 PENDING MESSAGES DEBUG: Messages data:', messagesData);
+          console.log('📨 PENDING MESSAGES DEBUG: Number of messages received:', messagesData.messages?.length || 0);
+          
           for (const message of messagesData.messages) {
+            console.log('📨 PENDING MESSAGES DEBUG: Processing message:', message);
             await handleDesktopMessage(message);
           }
+        } else if (data.connected && data.pendingMessages === 0) {
+          console.log('⚠️ PENDING MESSAGES DEBUG: Desktop connected but no pending messages');
+        } else if (!data.connected) {
+          console.log('❌ PENDING MESSAGES DEBUG: Desktop not connected');
         }
       } catch (error) {
-        console.error('Error checking desktop status:', error);
+        console.error('❌ PENDING MESSAGES DEBUG: Error checking desktop status:', error);
+        console.error('❌ PENDING MESSAGES DEBUG: Error details:', {
+          name: error.name,
+          message: error.message,
+          stack: error.stack
+        });
         setDesktopConnected(false);
       }
     };
