@@ -82,8 +82,17 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
   useEffect(() => {
     const checkDesktopConnection = async () => {
       try {
+        console.log('🔍 ENHANCED LOGGING: Checking desktop connection status...');
+        console.log('🔍 ENHANCED LOGGING: Making request to /api/desktop-sync?action=status');
+        
         const response = await fetch('/api/desktop-sync?action=status');
+        console.log('🔍 ENHANCED LOGGING: Desktop status response received');
+        console.log('🔍 ENHANCED LOGGING: Response status:', response.status);
+        console.log('🔍 ENHANCED LOGGING: Response ok:', response.ok);
+        
         const data = await response.json();
+        console.log('🔍 ENHANCED LOGGING: Desktop status data:', data);
+        
         setDesktopConnected(data.connected);
         
         // ENHANCED LOGGING: Show pending messages count
@@ -133,27 +142,48 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
   }, []);
 
   const handleDesktopMessage = async (message: any) => {
-    console.log('📱 CallAnalyzer received desktop message:', message);
+    console.log('📱 ENHANCED LOGGING: CallAnalyzer received desktop message:', message);
+    console.log('📱 ENHANCED LOGGING: Message type:', message.type);
+    console.log('📱 ENHANCED LOGGING: Current live state:', live);
+    console.log('📱 ENHANCED LOGGING: Current connecting state:', connecting);
     
     switch (message.type) {
       case 'desktop-call-started':
-        console.log('🎯 Desktop triggered call start - starting live analysis immediately');
+        console.log('🎯 ENHANCED LOGGING: Desktop triggered call start - starting live analysis immediately');
+        console.log('🎯 ENHANCED LOGGING: Device settings:', message.deviceSettings);
+        console.log('🎯 ENHANCED LOGGING: Current state before start:', { live, connecting });
+        
         if (!live && !connecting) {
+          console.log('🎯 ENHANCED LOGGING: Conditions met, setting desktop triggered and starting live analysis');
           setDesktopTriggered(true);
           
           // Start the live analysis immediately
+          console.log('🎯 ENHANCED LOGGING: About to call startLive(true)');
           await startLive(true);
+          console.log('🎯 ENHANCED LOGGING: startLive(true) completed');
+        } else {
+          console.log('⚠️ ENHANCED LOGGING: Cannot start - already live or connecting');
+          console.log('⚠️ ENHANCED LOGGING: Current state:', { live, connecting });
         }
         break;
       case 'desktop-call-stopped':
-        console.log('🛑 Desktop triggered call stop');
+        console.log('🛑 ENHANCED LOGGING: Desktop triggered call stop');
+        console.log('🛑 ENHANCED LOGGING: Current live state:', live);
+        
         if (live) {
+          console.log('🛑 ENHANCED LOGGING: Stopping live analysis');
           stopLive();
+        } else {
+          console.log('⚠️ ENHANCED LOGGING: Cannot stop - not currently live');
         }
         break;
       case 'insight-generated':
+        console.log('🧠 ENHANCED LOGGING: Received insight from desktop:', message);
         // Handle insights from desktop if needed
         break;
+      default:
+        console.log('❓ ENHANCED LOGGING: Unknown message type from desktop:', message.type);
+        console.log('❓ ENHANCED LOGGING: Full message:', message);
     }
   };
 
@@ -229,7 +259,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
   const handleTranscript = (transcript: string, isFinal: boolean, deepgramSpeaker?: number) => {
     if (!transcript || transcript.trim() === '') return;
     
-    console.log(`🎤 Transcript: "${transcript}" (Final: ${isFinal}, Speaker: ${deepgramSpeaker})`);
+    console.log(`🎤 ENHANCED LOGGING: Transcript received: "${transcript}" (Final: ${isFinal}, Speaker: ${deepgramSpeaker})`);
     
     // Update last transcript time
     lastTranscriptTime.current = Date.now();
@@ -438,8 +468,14 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
 
   // Connect to local WebSocket server instead of Deepgram directly
   async function connectWithRetry() {
+    console.log('🔗 ENHANCED LOGGING: Starting connectWithRetry function');
+    console.log('🔗 ENHANCED LOGGING: Current state:', { live, connecting, desktopTriggered });
+    
     const token = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
+    console.log('🔗 ENHANCED LOGGING: Deepgram API key check:', token ? 'Present' : 'Missing');
+    
     if (!token) {
+      console.error('❌ ENHANCED LOGGING: Deepgram API key is not configured');
       toast({
         variant: 'destructive',
         title: 'Configuration Error',
@@ -449,21 +485,30 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     }
 
     // Create call session in database
+    console.log('🔗 ENHANCED LOGGING: Creating call session in database...');
     const callId = await createCallSession();
     if (!callId) {
+      console.error('❌ ENHANCED LOGGING: Failed to create call session, aborting');
       return; // Error already shown in createCallSession
     }
+    console.log('🔗 ENHANCED LOGGING: Call session created with ID:', callId);
+    
     setCurrentCallId(callId);
     setCallStartTime(Date.now());
 
     try {
       // Connect to local WebSocket server instead of Deepgram directly
+      console.log('🔗 ENHANCED LOGGING: About to create WebSocket connection to ws://localhost:8080/web-app');
       const ws = new WebSocket('ws://localhost:8080/web-app');
       socketRef.current = ws;
       setConnecting(true);
+      console.log('🔗 ENHANCED LOGGING: WebSocket object created, setting connecting to true');
 
       ws.onopen = async () => {
-        console.log('✅ Connected to local WebSocket server');
+        console.log('✅ ENHANCED LOGGING: WebSocket onopen event fired - Connected to local WebSocket server');
+        console.log('✅ ENHANCED LOGGING: WebSocket readyState:', ws.readyState);
+        console.log('✅ ENHANCED LOGGING: About to set live=true and connecting=false');
+        
         setLive(true);
         setConnecting(false);
         setMessages([]);
@@ -476,11 +521,18 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         clearLongSpeechTimer();
         currentSegmentStartTime.current = 0;
         
+        console.log('✅ ENHANCED LOGGING: State reset completed, about to send start-transcription message');
+        console.log('✅ ENHANCED LOGGING: Deepgram API key being sent:', token ? 'Present' : 'Missing');
+        
         // Send Deepgram API key to WebSocket server to start transcription
-        ws.send(JSON.stringify({
+        const startTranscriptionMessage = {
           type: 'start-transcription',
           deepgramApiKey: token
-        }));
+        };
+        
+        console.log('✅ ENHANCED LOGGING: Sending start-transcription message:', startTranscriptionMessage);
+        ws.send(JSON.stringify(startTranscriptionMessage));
+        console.log('✅ ENHANCED LOGGING: start-transcription message sent successfully');
         
         // CRITICAL: Send confirmation to desktop app that call analysis is truly active
         console.log('🔄 ENHANCED LOGGING: About to send call started confirmation to desktop app');
@@ -528,22 +580,38 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         }
       };
 
-      ws.onerror = () => {
+      ws.onerror = (error) => {
         console.error('❌ ENHANCED LOGGING: WebSocket connection error occurred');
+        console.error('❌ ENHANCED LOGGING: Error event:', error);
+        console.error('❌ ENHANCED LOGGING: WebSocket readyState:', ws.readyState);
+        console.error('❌ ENHANCED LOGGING: Error type:', error.type);
+        console.error('❌ ENHANCED LOGGING: Error target:', error.target);
+        
         setConnecting(false);
         stopLive();
       };
 
       ws.onmessage = (evt) => {
         try {
+          console.log('📨 ENHANCED LOGGING: WebSocket message received');
+          console.log('📨 ENHANCED LOGGING: Message data type:', typeof evt.data);
+          console.log('📨 ENHANCED LOGGING: Message data length:', evt.data.length);
+          
           const msg = JSON.parse(evt.data);
+          console.log('📨 ENHANCED LOGGING: Parsed message:', msg);
+          console.log('📨 ENHANCED LOGGING: Message type:', msg.type);
           
           if (msg.type === 'deepgram-result' && msg.data) {
+            console.log('📨 ENHANCED LOGGING: Processing Deepgram result');
             const deepgramResult = msg.data;
+            console.log('📨 ENHANCED LOGGING: Deepgram result type:', deepgramResult.type);
             
             if (deepgramResult.type === 'Results' && deepgramResult.channel?.alternatives?.[0]?.transcript) {
               const transcript = deepgramResult.channel.alternatives[0].transcript;
               const isFinal = deepgramResult.is_final || false;
+              
+              console.log('📨 ENHANCED LOGGING: Processing transcript:', transcript);
+              console.log('📨 ENHANCED LOGGING: Is final:', isFinal);
               
               // Try to get speaker from words array
               let speakerId = undefined;
@@ -567,25 +635,33 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
                 }
               }
               
+              console.log('📨 ENHANCED LOGGING: Detected speaker ID:', speakerId);
               handleTranscript(transcript, isFinal, speakerId);
             }
           } else if (msg.type === 'deepgram-connected') {
-            console.log('✅ WebSocket server connected to Deepgram');
+            console.log('✅ ENHANCED LOGGING: WebSocket server connected to Deepgram');
           } else if (msg.type === 'deepgram-error') {
-            console.error('❌ Deepgram error via WebSocket:', msg.error);
+            console.error('❌ ENHANCED LOGGING: Deepgram error via WebSocket:', msg.error);
             toast({
               variant: 'destructive',
               title: 'Transcription Error',
               description: 'Failed to connect to transcription service.'
             });
+          } else {
+            console.log('📨 ENHANCED LOGGING: Unknown message type:', msg.type);
           }
         } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
+          console.error('❌ ENHANCED LOGGING: Error parsing WebSocket message:', error);
+          console.error('❌ ENHANCED LOGGING: Raw message data:', evt.data);
         }
       };
 
-      ws.onclose = async () => {
-        console.log('WebSocket closed');
+      ws.onclose = async (event) => {
+        console.log('🔗 ENHANCED LOGGING: WebSocket onclose event fired');
+        console.log('🔗 ENHANCED LOGGING: Close event code:', event.code);
+        console.log('🔗 ENHANCED LOGGING: Close event reason:', event.reason);
+        console.log('🔗 ENHANCED LOGGING: Close event wasClean:', event.wasClean);
+        
         finalizeCurrentConversation();
         setLive(false);
         setConnecting(false);
@@ -633,7 +709,11 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         }
       };
     } catch (err) {
-      console.error('Connection error:', err);
+      console.error('❌ ENHANCED LOGGING: Connection error in connectWithRetry:', err);
+      console.error('❌ ENHANCED LOGGING: Error name:', err.name);
+      console.error('❌ ENHANCED LOGGING: Error message:', err.message);
+      console.error('❌ ENHANCED LOGGING: Error stack:', err.stack);
+      
       setConnecting(false);
       stopLive();
       
@@ -646,12 +726,16 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
   }
 
   const startLive = async (triggeredByDesktop = false) => {
-    console.log('🎯 Starting live call analysis, triggered by desktop:', triggeredByDesktop);
+    console.log('🎯 ENHANCED LOGGING: startLive function called');
+    console.log('🎯 ENHANCED LOGGING: triggeredByDesktop:', triggeredByDesktop);
+    console.log('🎯 ENHANCED LOGGING: Current state:', { live, connecting });
+    
     setDesktopTriggered(triggeredByDesktop);
     
     // For desktop-triggered calls, we don't need microphone access
     // The desktop app will handle audio capture via system audio
     if (!triggeredByDesktop) {
+      console.log('🎯 ENHANCED LOGGING: Not triggered by desktop, requesting microphone access');
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
           audio: { 
@@ -672,8 +756,10 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
             socketRef.current.send(e.data);
           }
         };
+        
+        console.log('🎯 ENHANCED LOGGING: Microphone access granted and recorder set up');
       } catch (err) {
-        console.error('Failed to start recording:', err);
+        console.error('❌ ENHANCED LOGGING: Failed to start recording:', err);
         toast({
           variant: 'destructive',
           title: 'Microphone error',
@@ -681,19 +767,26 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         });
         return;
       }
+    } else {
+      console.log('🎯 ENHANCED LOGGING: Desktop triggered - skipping microphone setup');
     }
 
+    console.log('🎯 ENHANCED LOGGING: About to call connectWithRetry');
     await connectWithRetry();
+    console.log('🎯 ENHANCED LOGGING: connectWithRetry completed');
   };
 
   const stopLive = async () => {
-    console.log('🛑 Stopping live call analysis');
+    console.log('🛑 ENHANCED LOGGING: stopLive function called');
+    console.log('🛑 ENHANCED LOGGING: Current state:', { live, connecting });
+    
     clearLongSpeechTimer();
     clearSilenceTimer();
     finalizeCurrentConversation();
 
     const rec = recorderRef.current;
     if (rec && rec.state !== 'inactive') {
+      console.log('🛑 ENHANCED LOGGING: Stopping media recorder');
       rec.stop();
       rec.stream.getTracks().forEach(t => t.stop());
       recorderRef.current = undefined;
@@ -701,6 +794,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     
     const ws = socketRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
+      console.log('🛑 ENHANCED LOGGING: Closing WebSocket connection');
       // Tell WebSocket server to stop transcription
       ws.send(JSON.stringify({ type: 'stop-transcription' }));
       ws.close();
@@ -714,6 +808,8 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     if (currentCallId) {
       setShowFeedbackModal(true);
     }
+    
+    console.log('🛑 ENHANCED LOGGING: stopLive completed');
   };
 
   const handleFeedbackModalClose = () => {
