@@ -222,7 +222,9 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
           } else {
             // Authentication is complete and user is logged in, start the call immediately
             console.log('🎯 ENHANCED LOGGING: Authentication ready, starting live analysis immediately');
+            console.log('🎯 ENHANCED LOGGING: About to call startLive(true)');
             await startLive(true);
+            console.log('🎯 ENHANCED LOGGING: startLive(true) completed');
             setProcessingDesktopMessage(false);
           }
         } else {
