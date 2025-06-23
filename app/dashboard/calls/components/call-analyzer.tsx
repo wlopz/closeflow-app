@@ -433,7 +433,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
   };
 
   // Create a new call session in the database
-  const createCallSession = async (): Promise<string | null> {
+  const createCallSession = async (): Promise<string | null> => {
     console.log('🔐 ENHANCED LOGGING: createCallSession called');
     console.log('🔐 ENHANCED LOGGING: Auth loading state:', loading);
     console.log('🔐 ENHANCED LOGGING: User exists:', !!user);
@@ -735,6 +735,11 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         description: 'Please log in to start a call session.'
       });
       return;
+    }
+    
+    // Set desktop triggered state if applicable
+    if (triggeredByDesktop) {
+      setDesktopTriggered(true);
     }
     
     // For desktop-triggered calls, we don't need microphone access
