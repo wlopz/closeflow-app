@@ -58,12 +58,12 @@ class SystemAudioCapture {
     try {
       console.log('🎤 Starting system audio capture...');
 
-      // Enhanced renderer-based audio capture with fixed getUserMedia constraints
+      // Enhanced renderer-based audio capture with explicit MIME type
       const success = await this.mainWindow.webContents.executeJavaScript(`
         (async () => {
           try {
-            console.log('🎤 Starting DIRECT WebSocket audio capture in renderer process');
-            console.log('🔍 Selected source ID:', '${this.selectedSourceId}');
+            console.log('🎤 ENHANCED LOGGING: Starting DIRECT WebSocket audio capture in renderer process');
+            console.log('🔍 ENHANCED LOGGING: Selected source ID:', '${this.selectedSourceId}');
             
             // Clean up any existing streams and connections
             if (window.closeFlowSystemStream) {
@@ -87,18 +87,18 @@ class SystemAudioCapture {
             }
 
             // CRITICAL: Connect directly to WebSocket from renderer
-            console.log('🔗 Connecting renderer directly to WebSocket server...');
+            console.log('🔗 ENHANCED LOGGING: Connecting renderer directly to WebSocket server...');
             const ws = new WebSocket('ws://localhost:8080/desktop-renderer');
             window.closeFlowWebSocket = ws;
 
             // Wait for WebSocket connection
             await new Promise((resolve, reject) => {
               ws.onopen = () => {
-                console.log('✅ Renderer connected directly to WebSocket server');
+                console.log('✅ ENHANCED LOGGING: Renderer connected directly to WebSocket server');
                 resolve();
               };
               ws.onerror = (error) => {
-                console.error('❌ Renderer WebSocket connection failed:', error);
+                console.error('❌ ENHANCED LOGGING: Renderer WebSocket connection failed:', error);
                 reject(error);
               };
               // Timeout after 5 seconds
@@ -106,10 +106,10 @@ class SystemAudioCapture {
             });
 
             // ENHANCEMENT: Add small delay before getUserMedia to prevent race conditions
-            console.log('⏱️ Adding initialization delay...');
+            console.log('⏱️ ENHANCED LOGGING: Adding initialization delay...');
             await new Promise(resolve => setTimeout(resolve, 100));
 
-            console.log('🎤 About to call getUserMedia with source:', '${this.selectedSourceId}');
+            console.log('🎤 ENHANCED LOGGING: About to call getUserMedia with source:', '${this.selectedSourceId}');
             
             // FIXED: Use the supported getUserMedia API format
             const constraints = {
@@ -120,13 +120,13 @@ class SystemAudioCapture {
               video: false
             };
             
-            console.log('🎤 getUserMedia constraints:', constraints);
+            console.log('🎤 ENHANCED LOGGING: getUserMedia constraints:', constraints);
             
             // Get the audio stream from the selected source using the correct API
             const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
-            console.log('✅ getUserMedia completed successfully');
-            console.log('📊 Stream details:', {
+            console.log('✅ ENHANCED LOGGING: getUserMedia completed successfully');
+            console.log('📊 ENHANCED LOGGING: Stream details:', {
               id: stream.id,
               active: stream.active,
               audioTracks: stream.getAudioTracks().length
@@ -140,59 +140,95 @@ class SystemAudioCapture {
               throw new Error('No audio tracks found in stream');
             }
             
-            console.log('🎵 Audio track details:', audioTracks.map(track => ({
+            console.log('🎵 ENHANCED LOGGING: Audio track details:', audioTracks.map(track => ({
               id: track.id,
               label: track.label,
               enabled: track.enabled,
               readyState: track.readyState
             })));
 
-            // CRITICAL FIX: Create MediaRecorder with NO specific options to avoid compatibility issues
-            console.log('🎬 Creating MediaRecorder with default options...');
-            console.log('🔧 Using browser default settings for maximum compatibility');
+            // CRITICAL FIX: Create MediaRecorder with explicit MIME type for better compatibility
+            console.log('🎬 ENHANCED LOGGING: Creating MediaRecorder with explicit MIME type...');
             
-            // Let the browser choose the best format automatically
-            const mediaRecorder = new MediaRecorder(stream);
+            // Check supported MIME types
+            const supportedTypes = [
+              'audio/webm;codecs=opus',
+              'audio/webm',
+              'audio/mp4',
+              'audio/ogg;codecs=opus'
+            ];
             
-            console.log('✅ MediaRecorder created successfully with default options');
-            console.log('📊 MediaRecorder mimeType:', mediaRecorder.mimeType);
+            let selectedMimeType = '';
+            for (const type of supportedTypes) {
+              if (MediaRecorder.isTypeSupported(type)) {
+                selectedMimeType = type;
+                console.log('✅ ENHANCED LOGGING: Selected supported MIME type:', type);
+                break;
+              }
+            }
+            
+            if (!selectedMimeType) {
+              console.log('⚠️ ENHANCED LOGGING: No preferred MIME types supported, using default');
+              selectedMimeType = '';
+            }
+            
+            const mediaRecorderOptions = selectedMimeType ? { mimeType: selectedMimeType } : {};
+            console.log('🔧 ENHANCED LOGGING: MediaRecorder options:', mediaRecorderOptions);
+            
+            const mediaRecorder = new MediaRecorder(stream, mediaRecorderOptions);
+            
+            console.log('✅ ENHANCED LOGGING: MediaRecorder created successfully');
+            console.log('📊 ENHANCED LOGGING: MediaRecorder mimeType:', mediaRecorder.mimeType);
+            console.log('📊 ENHANCED LOGGING: MediaRecorder state:', mediaRecorder.state);
 
             window.closeFlowMediaRecorder = mediaRecorder;
 
             // DIRECT WebSocket TRANSFER - NO IPC!
             mediaRecorder.ondataavailable = (event) => {
               if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-                console.log('🎤 Sending audio data directly via WebSocket, size:', event.data.size);
+                console.log('🎤 ENHANCED LOGGING: Sending audio data directly via WebSocket');
+                console.log('🎤 ENHANCED LOGGING: Audio chunk size:', event.data.size);
+                console.log('🎤 ENHANCED LOGGING: Audio chunk type:', event.data.type);
+                console.log('🎤 ENHANCED LOGGING: WebSocket ready state:', ws.readyState);
+                
                 // Send binary data directly to WebSocket - NO IPC INVOLVED
                 ws.send(event.data);
+                console.log('🎤 ENHANCED LOGGING: Audio data sent successfully');
+              } else {
+                console.log('⚠️ ENHANCED LOGGING: Cannot send audio data');
+                console.log('⚠️ ENHANCED LOGGING: Data size:', event.data.size);
+                console.log('⚠️ ENHANCED LOGGING: WebSocket ready state:', ws.readyState);
               }
             };
 
             mediaRecorder.onerror = (error) => {
-              console.error('❌ MediaRecorder error:', error);
+              console.error('❌ ENHANCED LOGGING: MediaRecorder error:', error);
+              console.error('❌ ENHANCED LOGGING: Error event:', error.error);
             };
 
             mediaRecorder.onstop = () => {
-              console.log('🛑 MediaRecorder stopped');
+              console.log('🛑 ENHANCED LOGGING: MediaRecorder stopped');
             };
 
             mediaRecorder.onstart = () => {
-              console.log('▶️ MediaRecorder started');
+              console.log('▶️ ENHANCED LOGGING: MediaRecorder started successfully');
+              console.log('▶️ ENHANCED LOGGING: MediaRecorder state after start:', mediaRecorder.state);
             };
 
             // CRITICAL: Start recording with optimized timing and add extra logging
-            console.log('🎤 About to start MediaRecorder...');
-            console.log('📊 MediaRecorder state before start:', mediaRecorder.state);
+            console.log('🎤 ENHANCED LOGGING: About to start MediaRecorder...');
+            console.log('📊 ENHANCED LOGGING: MediaRecorder state before start:', mediaRecorder.state);
             
-            mediaRecorder.start(1000); // 1-second chunks for better performance
+            // Use 1-second chunks for better real-time performance
+            mediaRecorder.start(1000);
             
-            console.log('📊 MediaRecorder state after start:', mediaRecorder.state);
-            console.log('✅ DIRECT WebSocket audio capture started successfully');
+            console.log('📊 ENHANCED LOGGING: MediaRecorder state after start:', mediaRecorder.state);
+            console.log('✅ ENHANCED LOGGING: DIRECT WebSocket audio capture started successfully');
             return true;
 
           } catch (error) {
-            console.error('❌ Failed to start direct WebSocket audio capture:', error);
-            console.error('❌ Error details:', {
+            console.error('❌ ENHANCED LOGGING: Failed to start direct WebSocket audio capture:', error);
+            console.error('❌ ENHANCED LOGGING: Error details:', {
               name: error.name,
               message: error.message,
               stack: error.stack
@@ -212,7 +248,7 @@ class SystemAudioCapture {
           }));
         }
 
-        console.log('✅ System audio capture started successfully with DIRECT WebSocket and fixed getUserMedia API');
+        console.log('✅ System audio capture started successfully with DIRECT WebSocket and explicit MIME type');
         return true;
       } else {
         throw new Error('Failed to start direct WebSocket audio capture in renderer process');
