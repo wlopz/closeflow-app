@@ -61,6 +61,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
   const [desktopConnected, setDesktopConnected] = useState(false);
   const [processingDesktopMessage, setProcessingDesktopMessage] = useState(false);
   const [authenticationLoading, setAuthenticationLoading] = useState(true);
+  const [pendingDesktopCallMessageId, setPendingDesktopCallMessageId] = useState<string | null>(null);
   
   // State for building complete conversations
   const [currentSpeaker, setCurrentSpeaker] = useState<number | null>(null);
@@ -86,6 +87,25 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     console.log('🔐 ENHANCED LOGGING: User state:', user ? 'authenticated' : 'not authenticated');
     setAuthenticationLoading(loading);
   }, [loading, user]);
+
+  // Process pending desktop call when authentication is complete
+  useEffect(() => {
+    const processPendingCall = async () => {
+      // Only proceed if we have a pending call, authentication is complete, and user is logged in
+      if (pendingDesktopCallMessageId && !authenticationLoading && user) {
+        console.log('🔄 ENHANCED LOGGING: Processing pending desktop call message:', pendingDesktopCallMessageId);
+        console.log('🔄 ENHANCED LOGGING: Authentication is complete and user is logged in');
+        
+        // Start the call
+        await startLive(true);
+        
+        // Clear the pending message ID to prevent reprocessing
+        setPendingDesktopCallMessageId(null);
+      }
+    };
+    
+    processPendingCall();
+  }, [pendingDesktopCallMessageId, authenticationLoading, user]);
 
   // Check desktop connection status and listen for desktop triggers
   useEffect(() => {
@@ -184,12 +204,27 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
             console.error('❌ ENHANCED LOGGING: Error acknowledging message:', error);
           }
           
-          // Start the live analysis immediately
-          console.log('🎯 ENHANCED LOGGING: About to call startLive(true)');
-          await startLive(true);
-          console.log('🎯 ENHANCED LOGGING: startLive(true) completed');
-          
-          setProcessingDesktopMessage(false);
+          // CRITICAL FIX: Instead of starting immediately, check authentication state
+          if (authenticationLoading) {
+            console.log('⏳ ENHANCED LOGGING: Authentication still loading, queueing desktop call request');
+            // Store the message ID to process once authentication is complete
+            setPendingDesktopCallMessageId(message.id);
+            setProcessingDesktopMessage(false);
+          } else if (!user) {
+            console.log('❌ ENHANCED LOGGING: No authenticated user, cannot start call');
+            toast({
+              variant: 'destructive',
+              title: 'Authentication required',
+              description: 'Please log in to start a call session.'
+            });
+            setProcessingDesktopMessage(false);
+            setDesktopTriggered(false);
+          } else {
+            // Authentication is complete and user is logged in, start the call immediately
+            console.log('🎯 ENHANCED LOGGING: Authentication ready, starting live analysis immediately');
+            await startLive(true);
+            setProcessingDesktopMessage(false);
+          }
         } else {
           console.log('⚠️ ENHANCED LOGGING: Call already active or connecting, ignoring desktop trigger');
           
@@ -446,7 +481,6 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     console.log('🔐 ENHANCED LOGGING: createCallSession called');
     console.log('🔐 ENHANCED LOGGING: Auth loading state:', loading);
     console.log('🔐 ENHANCED LOGGING: User exists:', !!user);
-    console.log('🔐 ENHANCED LOGGING: User ID:', user?.id);
     
     if (loading) {
       console.log('⚠️ ENHANCED LOGGING: Authentication still loading, cannot create call session yet');
@@ -726,8 +760,14 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     console.log('🎯 ENHANCED LOGGING: Current state:', { live, connecting });
     
     // Check authentication state before proceeding
-    if (loading) {
+    if (authenticationLoading) {
       console.log('⏳ ENHANCED LOGGING: Authentication still loading, cannot start call');
+      
+      // If triggered by desktop, we'll queue it for processing later
+      if (triggeredByDesktop) {
+        return;
+      }
+      
       toast({
         variant: 'destructive',
         title: 'Authentication loading',
@@ -738,6 +778,12 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
 
     if (!user) {
       console.log('❌ ENHANCED LOGGING: No authenticated user, cannot start call');
+      
+      // If triggered by desktop, we'll just return without showing a toast
+      if (triggeredByDesktop) {
+        return;
+      }
+      
       toast({
         variant: 'destructive',
         title: 'Authentication required',
@@ -818,6 +864,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     setLive(false);
     setConnecting(false);
     setDesktopTriggered(false);
+    setPendingDesktopCallMessageId(null);
     
     // Show feedback modal if we have a call session
     if (currentCallId) {
@@ -997,7 +1044,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     
     return (
       <div className={cn(
-        "flex items-start gap-3 mb-4 max-w-[85%]",
+        "flex items-start gap-3 mb-4 max-w-[85%] opacity-90",
         isRightSide ? "ml-auto flex-row-reverse" : "mr-auto"
       )}>
         <div className={cn(
