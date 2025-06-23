@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { v4 as uuidv4 } from 'uuid';
 
 // Separate in-memory stores for bidirectional communication
 let webAppToDesktopMessages: any[] = []; // Messages from web app TO desktop app
@@ -19,8 +20,9 @@ function handleDesktopMessage(message: any) {
       console.log('🎯 ENHANCED LOGGING: Device settings received:', message.deviceSettings);
       console.log('🎯 ENHANCED LOGGING: Message timestamp:', message.timestamp);
       
-      // Store the message for web app to pick up
+      // Store the message for web app to pick up with a unique ID
       const startMessage = {
+        id: uuidv4(), // Add unique ID for message acknowledgment
         type: 'desktop-call-started',
         deviceSettings: message.deviceSettings,
         timestamp: message.timestamp
@@ -43,8 +45,9 @@ function handleDesktopMessage(message: any) {
       
       webAppCallActive = false;
       
-      // Store the message for web app to pick up
+      // Store the message for web app to pick up with a unique ID
       const stopMessage = {
+        id: uuidv4(), // Add unique ID for message acknowledgment
         type: 'desktop-call-stopped',
         timestamp: message.timestamp
       };
@@ -87,7 +90,7 @@ export async function GET(request: NextRequest) {
         serverRunning: true,
         callActive: webAppCallActive,
         pendingMessages: webAppToDesktopMessages.length, // Desktop checks this queue
-        pendingWebAppMessages: desktopToWebAppMessages.length, // NEW: Web app checks this queue
+        pendingWebAppMessages: desktopToWebAppMessages.length, // Web app checks this queue
         lastPing: lastDesktopPing
       };
       
@@ -107,14 +110,11 @@ export async function GET(request: NextRequest) {
     case 'get-messages-for-webapp':
       console.log('📨 ENHANCED LOGGING: Get messages for web app request received');
       console.log('📨 ENHANCED LOGGING: Current desktopToWebAppMessages array length:', desktopToWebAppMessages.length);
-      console.log('📨 ENHANCED LOGGING: Messages to return to web app:', desktopToWebAppMessages);
       
-      // Return pending messages from desktop to web app and clear them
+      // Return pending messages from desktop to web app WITHOUT clearing them
+      // They will be cleared when explicitly acknowledged
       const webAppMessages = [...desktopToWebAppMessages];
-      console.log('📨 ENHANCED LOGGING: Created copy of messages for web app:', webAppMessages);
-      
-      desktopToWebAppMessages = [];
-      console.log('📨 ENHANCED LOGGING: Cleared desktopToWebAppMessages array, new length:', desktopToWebAppMessages.length);
+      console.log('📨 ENHANCED LOGGING: Messages to return to web app:', webAppMessages);
       
       const webAppMessagesResponse = { messages: webAppMessages };
       console.log('📨 ENHANCED LOGGING: Returning response to web app:', webAppMessagesResponse);
@@ -189,6 +189,26 @@ export async function POST(request: NextRequest) {
         const result = handleDesktopMessage(body);
         console.log('📮 ENHANCED LOGGING: Desktop message handled, result:', result);
         return Response.json(result);
+
+      case 'message-ack':
+        // New endpoint to acknowledge message processing
+        console.log('✅ ENHANCED LOGGING: Message acknowledgment received');
+        console.log('✅ ENHANCED LOGGING: Message ID to acknowledge:', body.messageId);
+        
+        if (!body.messageId) {
+          console.log('❌ ENHANCED LOGGING: No message ID provided for acknowledgment');
+          return Response.json({ error: 'No message ID provided' }, { status: 400 });
+        }
+        
+        console.log('✅ ENHANCED LOGGING: Current desktopToWebAppMessages length before removal:', desktopToWebAppMessages.length);
+        
+        // Remove the acknowledged message from the queue
+        desktopToWebAppMessages = desktopToWebAppMessages.filter(msg => msg.id !== body.messageId);
+        
+        console.log('✅ ENHANCED LOGGING: Message removed from queue');
+        console.log('✅ ENHANCED LOGGING: Current desktopToWebAppMessages length after removal:', desktopToWebAppMessages.length);
+        
+        return Response.json({ success: true, message: 'Message acknowledged and removed from queue' });
 
       case 'web-app-call-started-confirmation':
         console.log('✅ ENHANCED LOGGING: Web app confirmed call analysis started');

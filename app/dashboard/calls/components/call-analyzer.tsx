@@ -59,6 +59,8 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
   const [callStartTime, setCallStartTime] = useState<number>(0);
   const [desktopTriggered, setDesktopTriggered] = useState(false);
   const [desktopConnected, setDesktopConnected] = useState(false);
+  const [processingDesktopMessage, setProcessingDesktopMessage] = useState(false);
+  const [authenticationLoading, setAuthenticationLoading] = useState(true);
   
   // State for building complete conversations
   const [currentSpeaker, setCurrentSpeaker] = useState<number | null>(null);
@@ -76,9 +78,14 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
   const socketRef = useRef<WebSocket>();
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
-  
-  // CRITICAL FIX: Use the useAuth hook to get authentication state
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading } = useAuth();
+
+  // Update authentication loading state when auth state changes
+  useEffect(() => {
+    console.log('🔐 ENHANCED LOGGING: Auth loading state changed:', loading);
+    console.log('🔐 ENHANCED LOGGING: User state:', user ? 'authenticated' : 'not authenticated');
+    setAuthenticationLoading(loading);
+  }, [loading, user]);
 
   // Check desktop connection status and listen for desktop triggers
   useEffect(() => {
@@ -88,53 +95,53 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         console.log('🔍 ENHANCED LOGGING: Making request to /api/desktop-sync?action=status');
         
         const response = await fetch('/api/desktop-sync?action=status');
+        
         console.log('🔍 ENHANCED LOGGING: Desktop status response received');
         console.log('🔍 ENHANCED LOGGING: Response status:', response.status);
         console.log('🔍 ENHANCED LOGGING: Response ok:', response.ok);
         
-        const data = await response.json();
-        console.log('🔍 ENHANCED LOGGING: Desktop status data:', data);
-        
-        setDesktopConnected(data.connected);
-        
-        // ENHANCED LOGGING: Show pending messages count for web app
-        console.log('🔍 PENDING MESSAGES DEBUG: Checking desktop status');
-        console.log('🔍 PENDING MESSAGES DEBUG: Connected:', data.connected);
-        console.log('🔍 PENDING MESSAGES DEBUG: Pending messages for desktop:', data.pendingMessages);
-        console.log('🔍 PENDING MESSAGES DEBUG: Pending messages for web app:', data.pendingWebAppMessages);
-        console.log('🔍 PENDING MESSAGES DEBUG: Call active:', data.callActive);
-        console.log('🔍 PENDING MESSAGES DEBUG: Full response data:', data);
-        
-        // FIXED: Check for pending messages for web app (from desktop)
-        if (data.connected && data.pendingWebAppMessages > 0) {
-          console.log('📨 PENDING MESSAGES DEBUG: Found pending messages for web app, fetching them...');
-          console.log('📨 PENDING MESSAGES DEBUG: About to fetch from /api/desktop-sync?action=get-messages-for-webapp');
+        if (response.ok) {
+          const data = await response.json();
+          console.log('🔍 ENHANCED LOGGING: Desktop status data:', data);
           
-          const messagesResponse = await fetch('/api/desktop-sync?action=get-messages-for-webapp');
-          const messagesData = await messagesResponse.json();
+          // Enhanced logging for debugging
+          console.log('🔍 PENDING MESSAGES DEBUG: Checking desktop status');
+          console.log('🔍 PENDING MESSAGES DEBUG: Connected:', data.connected);
+          console.log('🔍 PENDING MESSAGES DEBUG: Pending messages for desktop:', data.pendingMessages);
+          console.log('🔍 PENDING MESSAGES DEBUG: Pending messages for web app:', data.pendingWebAppMessages);
+          console.log('🔍 PENDING MESSAGES DEBUG: Call active:', data.callActive);
+          console.log('🔍 PENDING MESSAGES DEBUG: Full response data:', data);
           
-          console.log('📨 PENDING MESSAGES DEBUG: Messages response status:', messagesResponse.status);
-          console.log('📨 PENDING MESSAGES DEBUG: Messages response ok:', messagesResponse.ok);
-          console.log('📨 PENDING MESSAGES DEBUG: Messages data:', messagesData);
-          console.log('📨 PENDING MESSAGES DEBUG: Number of messages received:', messagesData.messages?.length || 0);
+          setDesktopConnected(data.connected);
           
-          for (const message of messagesData.messages) {
-            console.log('📨 PENDING MESSAGES DEBUG: Processing message:', message);
-            await handleDesktopMessage(message);
+          // Check for pending messages from desktop
+          if (data.connected && data.pendingWebAppMessages > 0) {
+            console.log('📨 PENDING MESSAGES DEBUG: Found pending messages for web app, fetching them...');
+            console.log('📨 PENDING MESSAGES DEBUG: About to fetch from /api/desktop-sync?action=get-messages-for-webapp');
+            
+            const messagesResponse = await fetch('/api/desktop-sync?action=get-messages-for-webapp');
+            
+            console.log('📨 PENDING MESSAGES DEBUG: Messages response status:', messagesResponse.status);
+            console.log('📨 PENDING MESSAGES DEBUG: Messages response ok:', messagesResponse.ok);
+            
+            if (messagesResponse.ok) {
+              const messagesData = await messagesResponse.json();
+              console.log('📨 PENDING MESSAGES DEBUG: Messages data:', messagesData);
+              console.log('📨 PENDING MESSAGES DEBUG: Number of messages received:', messagesData.messages.length);
+              
+              for (const message of messagesData.messages) {
+                console.log('📨 PENDING MESSAGES DEBUG: Processing message:', message);
+                await handleDesktopMessage(message);
+              }
+            }
+          } else {
+            console.log('⚠️ PENDING MESSAGES DEBUG: Desktop connected but no pending messages for web app');
           }
-        } else if (data.connected && data.pendingWebAppMessages === 0) {
-          console.log('⚠️ PENDING MESSAGES DEBUG: Desktop connected but no pending messages for web app');
-        } else if (!data.connected) {
-          console.log('❌ PENDING MESSAGES DEBUG: Desktop not connected');
         }
       } catch (error) {
-        console.error('❌ PENDING MESSAGES DEBUG: Error checking desktop status:', error);
-        console.error('❌ PENDING MESSAGES DEBUG: Error details:', {
-          name: error.name,
-          message: error.message,
-          stack: error.stack
-        });
+        console.error('❌ ENHANCED LOGGING: Error checking desktop status:', error);
         setDesktopConnected(false);
+        setDesktopTriggered(false);
       }
     };
 
@@ -156,37 +163,69 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         console.log('🎯 ENHANCED LOGGING: Device settings:', message.deviceSettings);
         console.log('🎯 ENHANCED LOGGING: Current state before start:', { live, connecting });
         
+        // Only proceed if not already in a call and not currently connecting
         if (!live && !connecting) {
           console.log('🎯 ENHANCED LOGGING: Conditions met, setting desktop triggered and starting live analysis');
           setDesktopTriggered(true);
+          setProcessingDesktopMessage(true);
           
           // Start the live analysis immediately
           console.log('🎯 ENHANCED LOGGING: About to call startLive(true)');
           await startLive(true);
           console.log('🎯 ENHANCED LOGGING: startLive(true) completed');
+          
+          // Only acknowledge the message if authentication is complete and successful
+          if (!loading && user) {
+            console.log('✅ ENHANCED LOGGING: Authentication complete, acknowledging message');
+            try {
+              await fetch('/api/desktop-sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  type: 'message-ack',
+                  messageId: message.id
+                })
+              });
+              console.log('✅ ENHANCED LOGGING: Message acknowledged successfully');
+            } catch (error) {
+              console.error('❌ ENHANCED LOGGING: Error acknowledging message:', error);
+            }
+          } else {
+            console.log('⏳ ENHANCED LOGGING: Authentication still loading, not acknowledging message yet');
+            // The message will remain in the queue and be processed again on the next check
+          }
+          
+          setProcessingDesktopMessage(false);
         } else {
-          console.log('⚠️ ENHANCED LOGGING: Cannot start - already live or connecting');
-          console.log('⚠️ ENHANCED LOGGING: Current state:', { live, connecting });
+          console.log('⚠️ ENHANCED LOGGING: Call already active or connecting, ignoring desktop trigger');
         }
         break;
+        
       case 'desktop-call-stopped':
         console.log('🛑 ENHANCED LOGGING: Desktop triggered call stop');
-        console.log('🛑 ENHANCED LOGGING: Current live state:', live);
-        
         if (live) {
-          console.log('🛑 ENHANCED LOGGING: Stopping live analysis');
           stopLive();
-        } else {
-          console.log('⚠️ ENHANCED LOGGING: Cannot stop - not currently live');
+          
+          // Acknowledge the message
+          try {
+            await fetch('/api/desktop-sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                type: 'message-ack',
+                messageId: message.id
+              })
+            });
+            console.log('✅ ENHANCED LOGGING: Stop message acknowledged successfully');
+          } catch (error) {
+            console.error('❌ ENHANCED LOGGING: Error acknowledging stop message:', error);
+          }
         }
         break;
+        
       case 'insight-generated':
-        console.log('🧠 ENHANCED LOGGING: Received insight from desktop:', message);
         // Handle insights from desktop if needed
         break;
-      default:
-        console.log('❓ ENHANCED LOGGING: Unknown message type from desktop:', message.type);
-        console.log('❓ ENHANCED LOGGING: Full message:', message);
     }
   };
 
@@ -262,7 +301,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
   const handleTranscript = (transcript: string, isFinal: boolean, deepgramSpeaker?: number) => {
     if (!transcript || transcript.trim() === '') return;
     
-    console.log(`🎤 ENHANCED LOGGING: Transcript received: "${transcript}" (Final: ${isFinal}, Speaker: ${deepgramSpeaker})`);
+    console.log(`🎤 Transcript: "${transcript}" (Final: ${isFinal}, Speaker: ${deepgramSpeaker})`);
     
     // Update last transcript time
     lastTranscriptTime.current = Date.now();
@@ -394,25 +433,24 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
   };
 
   // Create a new call session in the database
-  const createCallSession = async (): Promise<string | null> => {
+  const createCallSession = async (): Promise<string | null> {
     console.log('🔐 ENHANCED LOGGING: createCallSession called');
-    console.log('🔐 ENHANCED LOGGING: Auth loading state:', authLoading);
+    console.log('🔐 ENHANCED LOGGING: Auth loading state:', loading);
     console.log('🔐 ENHANCED LOGGING: User exists:', !!user);
     console.log('🔐 ENHANCED LOGGING: User ID:', user?.id);
     
-    // CRITICAL FIX: Check authentication state before proceeding
-    if (authLoading) {
+    if (loading) {
       console.log('⚠️ ENHANCED LOGGING: Authentication still loading, cannot create call session yet');
       toast({
         variant: 'destructive',
         title: 'Authentication loading',
-        description: 'Please wait for authentication to complete before starting a call.'
+        description: 'Please wait for the authentication to complete before starting a call.'
       });
       return null;
     }
 
     if (!user) {
-      console.log('❌ ENHANCED LOGGING: No authenticated user found');
+      console.log('⚠️ ENHANCED LOGGING: No authenticated user, cannot create call session');
       toast({
         variant: 'destructive',
         title: 'Authentication required',
@@ -421,14 +459,8 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
       return null;
     }
 
-    console.log('✅ ENHANCED LOGGING: User authenticated, proceeding with call creation');
-    console.log('✅ ENHANCED LOGGING: User details:', {
-      id: user.id,
-      email: user.email,
-      created_at: user.created_at
-    });
-
     try {
+      console.log('🔐 ENHANCED LOGGING: Creating call with user ID:', user.id);
       const call = await CallsService.createCall({
         user_id: user.id,
         customer_name: desktopTriggered ? 'Desktop Zoom Call' : 'Live Call Session',
@@ -436,7 +468,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
       });
 
       if (call) {
-        console.log('✅ ENHANCED LOGGING: Created call session successfully:', call.id);
+        console.log('✅ Created call session:', call.id);
         
         // Notify desktop app of call start
         try {
@@ -458,13 +490,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         throw new Error('Failed to create call session');
       }
     } catch (error) {
-      console.error('❌ ENHANCED LOGGING: Error creating call session:', error);
-      console.error('❌ ENHANCED LOGGING: Error details:', {
-        name: error.name,
-        message: error.message,
-        stack: error.stack
-      });
-      
+      console.error('❌ Error creating call session:', error);
       toast({
         variant: 'destructive',
         title: 'Database error',
@@ -505,14 +531,35 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     console.log('🔗 ENHANCED LOGGING: Current state:', { live, connecting, desktopTriggered });
     
     const token = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
-    console.log('🔗 ENHANCED LOGGING: Deepgram API key check:', token ? 'Present' : 'Missing');
-    
     if (!token) {
-      console.error('❌ ENHANCED LOGGING: Deepgram API key is not configured');
+      console.log('❌ ENHANCED LOGGING: No Deepgram API key found');
       toast({
         variant: 'destructive',
         title: 'Configuration Error',
         description: 'Deepgram API key is not configured.'
+      });
+      return;
+    }
+    
+    console.log('🔗 ENHANCED LOGGING: Deepgram API key check: Present');
+
+    // Check authentication state before proceeding
+    if (loading) {
+      console.log('⏳ ENHANCED LOGGING: Authentication still loading, waiting...');
+      toast({
+        variant: 'destructive',
+        title: 'Authentication loading',
+        description: 'Please wait for the authentication to complete before starting a call.'
+      });
+      return;
+    }
+
+    if (!user) {
+      console.log('❌ ENHANCED LOGGING: No authenticated user, cannot proceed');
+      toast({
+        variant: 'destructive',
+        title: 'Authentication required',
+        description: 'Please log in to start a call session.'
       });
       return;
     }
@@ -521,27 +568,20 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     console.log('🔗 ENHANCED LOGGING: Creating call session in database...');
     const callId = await createCallSession();
     if (!callId) {
-      console.error('❌ ENHANCED LOGGING: Failed to create call session, aborting');
+      console.log('❌ ENHANCED LOGGING: Failed to create call session, aborting');
       return; // Error already shown in createCallSession
     }
-    console.log('🔗 ENHANCED LOGGING: Call session created with ID:', callId);
-    
     setCurrentCallId(callId);
     setCallStartTime(Date.now());
 
     try {
       // Connect to local WebSocket server instead of Deepgram directly
-      console.log('🔗 ENHANCED LOGGING: About to create WebSocket connection to ws://localhost:8080/web-app');
       const ws = new WebSocket('ws://localhost:8080/web-app');
       socketRef.current = ws;
       setConnecting(true);
-      console.log('🔗 ENHANCED LOGGING: WebSocket object created, setting connecting to true');
 
       ws.onopen = async () => {
-        console.log('✅ ENHANCED LOGGING: WebSocket onopen event fired - Connected to local WebSocket server');
-        console.log('✅ ENHANCED LOGGING: WebSocket readyState:', ws.readyState);
-        console.log('✅ ENHANCED LOGGING: About to set live=true and connecting=false');
-        
+        console.log('✅ Connected to local WebSocket server');
         setLive(true);
         setConnecting(false);
         setMessages([]);
@@ -554,28 +594,15 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         clearLongSpeechTimer();
         currentSegmentStartTime.current = 0;
         
-        console.log('✅ ENHANCED LOGGING: State reset completed, about to send start-transcription message');
-        console.log('✅ ENHANCED LOGGING: Deepgram API key being sent:', token ? 'Present' : 'Missing');
-        
         // Send Deepgram API key to WebSocket server to start transcription
-        const startTranscriptionMessage = {
+        ws.send(JSON.stringify({
           type: 'start-transcription',
           deepgramApiKey: token
-        };
-        
-        console.log('✅ ENHANCED LOGGING: Sending start-transcription message:', startTranscriptionMessage);
-        ws.send(JSON.stringify(startTranscriptionMessage));
-        console.log('✅ ENHANCED LOGGING: start-transcription message sent successfully');
+        }));
         
         // CRITICAL: Send confirmation to desktop app that call analysis is truly active
-        console.log('🔄 ENHANCED LOGGING: About to send call started confirmation to desktop app');
-        console.log('🔄 ENHANCED LOGGING: Current timestamp:', Date.now());
-        console.log('🔄 ENHANCED LOGGING: Desktop triggered flag:', desktopTriggered);
-        
         try {
-          console.log('🔄 ENHANCED LOGGING: Making fetch request to /api/desktop-sync');
-          
-          const confirmationResponse = await fetch('/api/desktop-sync', {
+          await fetch('/api/desktop-sync', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -583,68 +610,27 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
               timestamp: Date.now()
             })
           });
-          
-          console.log('🔄 ENHANCED LOGGING: Fetch response received');
-          console.log('🔄 ENHANCED LOGGING: Response status:', confirmationResponse.status);
-          console.log('🔄 ENHANCED LOGGING: Response ok:', confirmationResponse.ok);
-          console.log('🔄 ENHANCED LOGGING: Response headers:', Object.fromEntries(confirmationResponse.headers.entries()));
-          
-          if (confirmationResponse.ok) {
-            const confirmationData = await confirmationResponse.json();
-            console.log('✅ ENHANCED LOGGING: Successfully sent call started confirmation to desktop');
-            console.log('✅ ENHANCED LOGGING: Confirmation response data:', confirmationData);
-          } else {
-            const errorText = await confirmationResponse.text();
-            console.error('❌ ENHANCED LOGGING: Failed to send confirmation - HTTP error');
-            console.error('❌ ENHANCED LOGGING: Error status:', confirmationResponse.status);
-            console.error('❌ ENHANCED LOGGING: Error text:', errorText);
-          }
-        } catch (confirmationError) {
-          console.error('❌ ENHANCED LOGGING: Error sending confirmation to desktop:', confirmationError);
-          console.error('❌ ENHANCED LOGGING: Error name:', confirmationError.name);
-          console.error('❌ ENHANCED LOGGING: Error message:', confirmationError.message);
-          console.error('❌ ENHANCED LOGGING: Error stack:', confirmationError.stack);
-          
-          // Check if it's a network error
-          if (confirmationError instanceof TypeError && confirmationError.message.includes('fetch')) {
-            console.error('❌ ENHANCED LOGGING: This appears to be a network connectivity issue');
-            console.error('❌ ENHANCED LOGGING: Check if the Next.js server is running on the expected port');
-          }
+          console.log('✅ Sent call started confirmation to desktop');
+        } catch (error) {
+          console.error('Error sending confirmation to desktop:', error);
         }
       };
 
-      ws.onerror = (error) => {
-        console.error('❌ ENHANCED LOGGING: WebSocket connection error occurred');
-        console.error('❌ ENHANCED LOGGING: Error event:', error);
-        console.error('❌ ENHANCED LOGGING: WebSocket readyState:', ws.readyState);
-        console.error('❌ ENHANCED LOGGING: Error type:', error.type);
-        console.error('❌ ENHANCED LOGGING: Error target:', error.target);
-        
+      ws.onerror = () => {
         setConnecting(false);
         stopLive();
       };
 
       ws.onmessage = (evt) => {
         try {
-          console.log('📨 ENHANCED LOGGING: WebSocket message received');
-          console.log('📨 ENHANCED LOGGING: Message data type:', typeof evt.data);
-          console.log('📨 ENHANCED LOGGING: Message data length:', evt.data.length);
-          
           const msg = JSON.parse(evt.data);
-          console.log('📨 ENHANCED LOGGING: Parsed message:', msg);
-          console.log('📨 ENHANCED LOGGING: Message type:', msg.type);
           
           if (msg.type === 'deepgram-result' && msg.data) {
-            console.log('📨 ENHANCED LOGGING: Processing Deepgram result');
             const deepgramResult = msg.data;
-            console.log('📨 ENHANCED LOGGING: Deepgram result type:', deepgramResult.type);
             
             if (deepgramResult.type === 'Results' && deepgramResult.channel?.alternatives?.[0]?.transcript) {
               const transcript = deepgramResult.channel.alternatives[0].transcript;
               const isFinal = deepgramResult.is_final || false;
-              
-              console.log('📨 ENHANCED LOGGING: Processing transcript:', transcript);
-              console.log('📨 ENHANCED LOGGING: Is final:', isFinal);
               
               // Try to get speaker from words array
               let speakerId = undefined;
@@ -668,44 +654,32 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
                 }
               }
               
-              console.log('📨 ENHANCED LOGGING: Detected speaker ID:', speakerId);
               handleTranscript(transcript, isFinal, speakerId);
             }
           } else if (msg.type === 'deepgram-connected') {
-            console.log('✅ ENHANCED LOGGING: WebSocket server connected to Deepgram');
+            console.log('✅ WebSocket server connected to Deepgram');
           } else if (msg.type === 'deepgram-error') {
-            console.error('❌ ENHANCED LOGGING: Deepgram error via WebSocket:', msg.error);
+            console.error('❌ Deepgram error via WebSocket:', msg.error);
             toast({
               variant: 'destructive',
               title: 'Transcription Error',
               description: 'Failed to connect to transcription service.'
             });
-          } else {
-            console.log('📨 ENHANCED LOGGING: Unknown message type:', msg.type);
           }
         } catch (error) {
-          console.error('❌ ENHANCED LOGGING: Error parsing WebSocket message:', error);
-          console.error('❌ ENHANCED LOGGING: Raw message data:', evt.data);
+          console.error('Error parsing WebSocket message:', error);
         }
       };
 
-      ws.onclose = async (event) => {
-        console.log('🔗 ENHANCED LOGGING: WebSocket onclose event fired');
-        console.log('🔗 ENHANCED LOGGING: Close event code:', event.code);
-        console.log('🔗 ENHANCED LOGGING: Close event reason:', event.reason);
-        console.log('🔗 ENHANCED LOGGING: Close event wasClean:', event.wasClean);
-        
+      ws.onclose = async () => {
+        console.log('WebSocket closed');
         finalizeCurrentConversation();
         setLive(false);
         setConnecting(false);
         
         // CRITICAL: Send confirmation to desktop app that call analysis has stopped
-        console.log('🔄 ENHANCED LOGGING: About to send call stopped confirmation to desktop app');
-        
         try {
-          console.log('🔄 ENHANCED LOGGING: Making fetch request to send stop confirmation');
-          
-          const stopConfirmationResponse = await fetch('/api/desktop-sync', {
+          await fetch('/api/desktop-sync', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -713,26 +687,9 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
               timestamp: Date.now()
             })
           });
-          
-          console.log('🔄 ENHANCED LOGGING: Stop confirmation response status:', stopConfirmationResponse.status);
-          console.log('🔄 ENHANCED LOGGING: Stop confirmation response ok:', stopConfirmationResponse.ok);
-          
-          if (stopConfirmationResponse.ok) {
-            const stopConfirmationData = await stopConfirmationResponse.json();
-            console.log('✅ ENHANCED LOGGING: Successfully sent call stopped confirmation to desktop');
-            console.log('✅ ENHANCED LOGGING: Stop confirmation response data:', stopConfirmationData);
-          } else {
-            const stopErrorText = await stopConfirmationResponse.text();
-            console.error('❌ ENHANCED LOGGING: Failed to send stop confirmation');
-            console.error('❌ ENHANCED LOGGING: Stop error text:', stopErrorText);
-          }
-        } catch (stopConfirmationError) {
-          console.error('❌ ENHANCED LOGGING: Error sending stop confirmation to desktop:', stopConfirmationError);
-          console.error('❌ ENHANCED LOGGING: Stop error details:', {
-            name: stopConfirmationError.name,
-            message: stopConfirmationError.message,
-            stack: stopConfirmationError.stack
-          });
+          console.log('✅ Sent call stopped confirmation to desktop');
+        } catch (error) {
+          console.error('Error sending stop confirmation to desktop:', error);
         }
         
         // End call session in database and show feedback modal
@@ -742,11 +699,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         }
       };
     } catch (err) {
-      console.error('❌ ENHANCED LOGGING: Connection error in connectWithRetry:', err);
-      console.error('❌ ENHANCED LOGGING: Error name:', err.name);
-      console.error('❌ ENHANCED LOGGING: Error message:', err.message);
-      console.error('❌ ENHANCED LOGGING: Error stack:', err.stack);
-      
+      console.error('Connection error:', err);
       setConnecting(false);
       stopLive();
       
@@ -763,12 +716,30 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     console.log('🎯 ENHANCED LOGGING: triggeredByDesktop:', triggeredByDesktop);
     console.log('🎯 ENHANCED LOGGING: Current state:', { live, connecting });
     
-    setDesktopTriggered(triggeredByDesktop);
+    // Check authentication state before proceeding
+    if (loading) {
+      console.log('⏳ ENHANCED LOGGING: Authentication still loading, cannot start call');
+      toast({
+        variant: 'destructive',
+        title: 'Authentication loading',
+        description: 'Please wait for the authentication to complete before starting a call.'
+      });
+      return;
+    }
+
+    if (!user) {
+      console.log('❌ ENHANCED LOGGING: No authenticated user, cannot start call');
+      toast({
+        variant: 'destructive',
+        title: 'Authentication required',
+        description: 'Please log in to start a call session.'
+      });
+      return;
+    }
     
     // For desktop-triggered calls, we don't need microphone access
     // The desktop app will handle audio capture via system audio
     if (!triggeredByDesktop) {
-      console.log('🎯 ENHANCED LOGGING: Not triggered by desktop, requesting microphone access');
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
           audio: { 
@@ -789,10 +760,8 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
             socketRef.current.send(e.data);
           }
         };
-        
-        console.log('🎯 ENHANCED LOGGING: Microphone access granted and recorder set up');
       } catch (err) {
-        console.error('❌ ENHANCED LOGGING: Failed to start recording:', err);
+        console.error('Failed to start recording:', err);
         toast({
           variant: 'destructive',
           title: 'Microphone error',
@@ -809,7 +778,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     console.log('🎯 ENHANCED LOGGING: connectWithRetry completed');
   };
 
-  const stopLive = async () => {
+  const stopLive = () => {
     console.log('🛑 ENHANCED LOGGING: stopLive function called');
     console.log('🛑 ENHANCED LOGGING: Current state:', { live, connecting });
     
@@ -819,7 +788,6 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
 
     const rec = recorderRef.current;
     if (rec && rec.state !== 'inactive') {
-      console.log('🛑 ENHANCED LOGGING: Stopping media recorder');
       rec.stop();
       rec.stream.getTracks().forEach(t => t.stop());
       recorderRef.current = undefined;
@@ -827,7 +795,6 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     
     const ws = socketRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
-      console.log('🛑 ENHANCED LOGGING: Closing WebSocket connection');
       // Tell WebSocket server to stop transcription
       ws.send(JSON.stringify({ type: 'stop-transcription' }));
       ws.close();
@@ -836,6 +803,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     
     setLive(false);
     setConnecting(false);
+    setDesktopTriggered(false);
     
     // Show feedback modal if we have a call session
     if (currentCallId) {
@@ -1015,7 +983,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     
     return (
       <div className={cn(
-        "flex items-start gap-3 mb-4 max-w-[85%] opacity-90",
+        "flex items-start gap-3 mb-4 max-w-[85%]",
         isRightSide ? "ml-auto flex-row-reverse" : "mr-auto"
       )}>
         <div className={cn(
@@ -1075,16 +1043,28 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
 
   useEffect(() => () => stopLive(), []);
 
-  // Show loading state while authentication is being determined
-  if (authLoading) {
+  // Render authentication loading state
+  if (authenticationLoading) {
     return (
-      <div className="space-y-6">
-        <div className="mb-6 flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
-            <p className="text-muted-foreground">Initializing authentication...</p>
-          </div>
-        </div>
+      <div className="flex flex-col items-center justify-center p-8 h-[400px]">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
+        <h3 className="text-lg font-medium mb-2">Authentication loading</h3>
+        <p className="text-muted-foreground text-center max-w-md">
+          Please wait for the authentication to complete before starting a call.
+        </p>
+      </div>
+    );
+  }
+
+  // Render authentication required state
+  if (!user) {
+    return (
+      <div className="flex flex-col items-center justify-center p-8 h-[400px]">
+        <AlertTriangle className="h-12 w-12 text-amber-500 mb-4" />
+        <h3 className="text-lg font-medium mb-2">Authentication Required</h3>
+        <p className="text-muted-foreground text-center max-w-md">
+          Please log in to start a call session.
+        </p>
       </div>
     );
   }
@@ -1096,7 +1076,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
           <Button
             onClick={live ? stopLive : () => startLive()}
             variant={live ? 'destructive' : 'default'}
-            disabled={connecting || desktopTriggered}
+            disabled={connecting || desktopTriggered || processingDesktopMessage}
           >
             {connecting ? (
               'Connecting...'
