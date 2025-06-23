@@ -95,16 +95,17 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         
         setDesktopConnected(data.connected);
         
-        // ENHANCED LOGGING: Show pending messages count
+        // ENHANCED LOGGING: Show pending messages count for web app
         console.log('🔍 PENDING MESSAGES DEBUG: Checking desktop status');
         console.log('🔍 PENDING MESSAGES DEBUG: Connected:', data.connected);
-        console.log('🔍 PENDING MESSAGES DEBUG: Pending messages count:', data.pendingMessages);
+        console.log('🔍 PENDING MESSAGES DEBUG: Pending messages for desktop:', data.pendingMessages);
+        console.log('🔍 PENDING MESSAGES DEBUG: Pending messages for web app:', data.pendingWebAppMessages);
         console.log('🔍 PENDING MESSAGES DEBUG: Call active:', data.callActive);
         console.log('🔍 PENDING MESSAGES DEBUG: Full response data:', data);
         
-        // Check for pending messages from desktop
-        if (data.connected && data.pendingMessages > 0) {
-          console.log('📨 PENDING MESSAGES DEBUG: Found pending messages, fetching them...');
+        // FIXED: Check for pending messages for web app (from desktop)
+        if (data.connected && data.pendingWebAppMessages > 0) {
+          console.log('📨 PENDING MESSAGES DEBUG: Found pending messages for web app, fetching them...');
           console.log('📨 PENDING MESSAGES DEBUG: About to fetch from /api/desktop-sync?action=get-messages-for-webapp');
           
           const messagesResponse = await fetch('/api/desktop-sync?action=get-messages-for-webapp');
@@ -119,8 +120,8 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
             console.log('📨 PENDING MESSAGES DEBUG: Processing message:', message);
             await handleDesktopMessage(message);
           }
-        } else if (data.connected && data.pendingMessages === 0) {
-          console.log('⚠️ PENDING MESSAGES DEBUG: Desktop connected but no pending messages');
+        } else if (data.connected && data.pendingWebAppMessages === 0) {
+          console.log('⚠️ PENDING MESSAGES DEBUG: Desktop connected but no pending messages for web app');
         } else if (!data.connected) {
           console.log('❌ PENDING MESSAGES DEBUG: Desktop not connected');
         }

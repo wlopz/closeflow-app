@@ -87,6 +87,7 @@ export async function GET(request: NextRequest) {
         serverRunning: true,
         callActive: webAppCallActive,
         pendingMessages: webAppToDesktopMessages.length, // Desktop checks this queue
+        pendingWebAppMessages: desktopToWebAppMessages.length, // NEW: Web app checks this queue
         lastPing: lastDesktopPing
       };
       
