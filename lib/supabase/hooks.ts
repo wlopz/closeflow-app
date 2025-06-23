@@ -13,51 +13,134 @@ export function useAuth() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    console.log('🔐 ENHANCED LOGGING: useAuth hook initializing');
+    
     // Get initial session
     const getInitialSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setUser(session?.user ?? null);
+      console.log('🔐 ENHANCED LOGGING: Getting initial session from Supabase');
       
-      if (session?.user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
-        setProfile(profile);
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        console.log('🔐 ENHANCED LOGGING: Initial session response received');
+        console.log('🔐 ENHANCED LOGGING: Session exists:', !!session);
+        console.log('🔐 ENHANCED LOGGING: Session user exists:', !!session?.user);
+        console.log('🔐 ENHANCED LOGGING: Session error:', error);
+        
+        if (error) {
+          console.error('❌ ENHANCED LOGGING: Error getting initial session:', error);
+        }
+        
+        setUser(session?.user ?? null);
+        console.log('🔐 ENHANCED LOGGING: User state set to:', session?.user ? 'authenticated user' : 'null');
+        
+        if (session?.user) {
+          console.log('🔐 ENHANCED LOGGING: User authenticated, fetching profile');
+          console.log('🔐 ENHANCED LOGGING: User ID:', session.user.id);
+          console.log('🔐 ENHANCED LOGGING: User email:', session.user.email);
+          
+          const { data: profile, error: profileError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+            
+          console.log('🔐 ENHANCED LOGGING: Profile fetch completed');
+          console.log('🔐 ENHANCED LOGGING: Profile data exists:', !!profile);
+          console.log('🔐 ENHANCED LOGGING: Profile error:', profileError);
+          
+          if (profileError) {
+            console.error('❌ ENHANCED LOGGING: Error fetching profile:', profileError);
+          }
+          
+          setProfile(profile);
+        } else {
+          console.log('🔐 ENHANCED LOGGING: No user session, setting profile to null');
+          setProfile(null);
+        }
+        
+        setLoading(false);
+        console.log('🔐 ENHANCED LOGGING: Initial session setup completed, loading set to false');
+        
+      } catch (error) {
+        console.error('❌ ENHANCED LOGGING: Unexpected error in getInitialSession:', error);
+        setUser(null);
+        setProfile(null);
+        setLoading(false);
       }
-      
-      setLoading(false);
     };
 
     getInitialSession();
 
     // Listen for auth changes
+    console.log('🔐 ENHANCED LOGGING: Setting up auth state change listener');
+    
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        console.log('🔐 ENHANCED LOGGING: Auth state change event received');
+        console.log('🔐 ENHANCED LOGGING: Event type:', event);
+        console.log('🔐 ENHANCED LOGGING: Session exists:', !!session);
+        console.log('🔐 ENHANCED LOGGING: Session user exists:', !!session?.user);
+        
         setUser(session?.user ?? null);
+        console.log('🔐 ENHANCED LOGGING: User state updated to:', session?.user ? 'authenticated user' : 'null');
         
         if (session?.user) {
-          const { data: profile } = await supabase
+          console.log('🔐 ENHANCED LOGGING: Auth change - user authenticated, fetching profile');
+          console.log('🔐 ENHANCED LOGGING: User ID:', session.user.id);
+          
+          const { data: profile, error: profileError } = await supabase
             .from('profiles')
             .select('*')
             .eq('id', session.user.id)
             .single();
+            
+          console.log('🔐 ENHANCED LOGGING: Auth change - profile fetch completed');
+          console.log('🔐 ENHANCED LOGGING: Profile data exists:', !!profile);
+          console.log('🔐 ENHANCED LOGGING: Profile error:', profileError);
+          
+          if (profileError) {
+            console.error('❌ ENHANCED LOGGING: Error fetching profile on auth change:', profileError);
+          }
+          
           setProfile(profile);
         } else {
+          console.log('🔐 ENHANCED LOGGING: Auth change - no user, setting profile to null');
           setProfile(null);
         }
         
         setLoading(false);
+        console.log('🔐 ENHANCED LOGGING: Auth state change processing completed, loading set to false');
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      console.log('🔐 ENHANCED LOGGING: Cleaning up auth state change listener');
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    console.log('🔐 ENHANCED LOGGING: Sign out requested');
+    
+    try {
+      const { error } = await supabase.auth.signOut();
+      
+      if (error) {
+        console.error('❌ ENHANCED LOGGING: Error during sign out:', error);
+      } else {
+        console.log('✅ ENHANCED LOGGING: Sign out successful');
+      }
+    } catch (error) {
+      console.error('❌ ENHANCED LOGGING: Unexpected error during sign out:', error);
+    }
   };
+
+  console.log('🔐 ENHANCED LOGGING: useAuth hook returning state:', {
+    userExists: !!user,
+    profileExists: !!profile,
+    loading
+  });
 
   return {
     user,

@@ -76,7 +76,9 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
   const socketRef = useRef<WebSocket>();
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
-  const { user } = useAuth();
+  
+  // CRITICAL FIX: Use the useAuth hook to get authentication state
+  const { user, loading: authLoading } = useAuth();
 
   // Check desktop connection status and listen for desktop triggers
   useEffect(() => {
@@ -393,7 +395,24 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
 
   // Create a new call session in the database
   const createCallSession = async (): Promise<string | null> => {
+    console.log('🔐 ENHANCED LOGGING: createCallSession called');
+    console.log('🔐 ENHANCED LOGGING: Auth loading state:', authLoading);
+    console.log('🔐 ENHANCED LOGGING: User exists:', !!user);
+    console.log('🔐 ENHANCED LOGGING: User ID:', user?.id);
+    
+    // CRITICAL FIX: Check authentication state before proceeding
+    if (authLoading) {
+      console.log('⚠️ ENHANCED LOGGING: Authentication still loading, cannot create call session yet');
+      toast({
+        variant: 'destructive',
+        title: 'Authentication loading',
+        description: 'Please wait for authentication to complete before starting a call.'
+      });
+      return null;
+    }
+
     if (!user) {
+      console.log('❌ ENHANCED LOGGING: No authenticated user found');
       toast({
         variant: 'destructive',
         title: 'Authentication required',
@@ -401,6 +420,13 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
       });
       return null;
     }
+
+    console.log('✅ ENHANCED LOGGING: User authenticated, proceeding with call creation');
+    console.log('✅ ENHANCED LOGGING: User details:', {
+      id: user.id,
+      email: user.email,
+      created_at: user.created_at
+    });
 
     try {
       const call = await CallsService.createCall({
@@ -410,7 +436,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
       });
 
       if (call) {
-        console.log('✅ Created call session:', call.id);
+        console.log('✅ ENHANCED LOGGING: Created call session successfully:', call.id);
         
         // Notify desktop app of call start
         try {
@@ -432,7 +458,13 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         throw new Error('Failed to create call session');
       }
     } catch (error) {
-      console.error('❌ Error creating call session:', error);
+      console.error('❌ ENHANCED LOGGING: Error creating call session:', error);
+      console.error('❌ ENHANCED LOGGING: Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+      
       toast({
         variant: 'destructive',
         title: 'Database error',
@@ -1042,6 +1074,20 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
   };
 
   useEffect(() => () => stopLive(), []);
+
+  // Show loading state while authentication is being determined
+  if (authLoading) {
+    return (
+      <div className="space-y-6">
+        <div className="mb-6 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+            <p className="text-muted-foreground">Initializing authentication...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
