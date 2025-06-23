@@ -334,11 +334,64 @@ class DesktopRenderer {
         try {
             await ipcRenderer.invoke('select-output-device', deviceId);
             this.selectedDevices.output = deviceId;
-            this.showNotification('Output Device Changed', `Selected: ${this.getDeviceName('output', deviceId)}`, 'success');
+            
+            const deviceName = this.getDeviceName('output', deviceId);
+            
+            // Show success notification
+            this.showNotification('Output Device Changed', `Selected: ${deviceName}`, 'success');
+            
+            // Show important system audio routing notification
+            this.showSystemAudioRoutingNotification(deviceName);
+            
         } catch (error) {
             console.error('Error selecting output device:', error);
             this.showNotification('Error', 'Failed to change output device', 'error');
         }
+    }
+
+    showSystemAudioRoutingNotification(deviceName) {
+        // Create a special notification for system audio routing guidance
+        const notification = document.createElement('div');
+        notification.className = 'notification info system-audio-notification';
+        notification.innerHTML = `
+            <div class="notification-header">
+                <h4>🔊 System Audio Routing</h4>
+                <button class="notification-close" onclick="this.parentElement.parentElement.remove()">×</button>
+            </div>
+            <div class="notification-content">
+                <p><strong>Important:</strong> To ensure Zoom audio from other participants is captured correctly when using "Screen 1" as your system audio source, please also set <strong>${deviceName}</strong> as your default audio output in macOS System Settings.</p>
+                <div class="notification-steps">
+                    <p><strong>Quick Steps:</strong></p>
+                    <ol>
+                        <li>Open System Settings → Sound</li>
+                        <li>Set Output to: <strong>${deviceName}</strong></li>
+                        <li>This ensures system audio capture includes all Zoom participants</li>
+                    </ol>
+                </div>
+                <div class="notification-actions">
+                    <button onclick="this.openSystemSettings()" class="notification-btn">Open System Settings</button>
+                    <button onclick="this.parentElement.parentElement.parentElement.remove()" class="notification-btn secondary">Got it</button>
+                </div>
+            </div>
+        `;
+
+        // Add click handler for opening system settings
+        const openSettingsBtn = notification.querySelector('.notification-btn');
+        if (openSettingsBtn) {
+            openSettingsBtn.addEventListener('click', () => {
+                // Open macOS Sound settings
+                shell.openExternal('x-apple.systempreferences:com.apple.preference.sound');
+            });
+        }
+
+        this.notifications.appendChild(notification);
+
+        // Auto-remove after 15 seconds (longer than normal due to importance)
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 15000);
     }
 
     async selectSystemAudioSource(sourceId) {
