@@ -146,7 +146,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     };
 
     checkDesktopConnection();
-    const interval = setInterval(checkDesktopConnection, 2000); // Check every 2 seconds for faster response
+    const interval = setInterval(checkDesktopConnection, 2000); // Check every 2 seconds for fast response
     
     return () => clearInterval(interval);
   }, []);
@@ -169,44 +169,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
           setDesktopTriggered(true);
           setProcessingDesktopMessage(true);
           
-          // Start the live analysis immediately
-          console.log('🎯 ENHANCED LOGGING: About to call startLive(true)');
-          await startLive(true);
-          console.log('🎯 ENHANCED LOGGING: startLive(true) completed');
-          
-          // Only acknowledge the message if authentication is complete and successful
-          if (!loading && user) {
-            console.log('✅ ENHANCED LOGGING: Authentication complete, acknowledging message');
-            try {
-              await fetch('/api/desktop-sync', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  type: 'message-ack',
-                  messageId: message.id
-                })
-              });
-              console.log('✅ ENHANCED LOGGING: Message acknowledged successfully');
-            } catch (error) {
-              console.error('❌ ENHANCED LOGGING: Error acknowledging message:', error);
-            }
-          } else {
-            console.log('⏳ ENHANCED LOGGING: Authentication still loading, not acknowledging message yet');
-            // The message will remain in the queue and be processed again on the next check
-          }
-          
-          setProcessingDesktopMessage(false);
-        } else {
-          console.log('⚠️ ENHANCED LOGGING: Call already active or connecting, ignoring desktop trigger');
-        }
-        break;
-        
-      case 'desktop-call-stopped':
-        console.log('🛑 ENHANCED LOGGING: Desktop triggered call stop');
-        if (live) {
-          stopLive();
-          
-          // Acknowledge the message
+          // CRITICAL FIX: Acknowledge the message immediately to prevent it from being processed again
           try {
             await fetch('/api/desktop-sync', {
               method: 'POST',
@@ -216,10 +179,56 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
                 messageId: message.id
               })
             });
-            console.log('✅ ENHANCED LOGGING: Stop message acknowledged successfully');
+            console.log('✅ ENHANCED LOGGING: Message acknowledged immediately');
           } catch (error) {
-            console.error('❌ ENHANCED LOGGING: Error acknowledging stop message:', error);
+            console.error('❌ ENHANCED LOGGING: Error acknowledging message:', error);
           }
+          
+          // Start the live analysis immediately
+          console.log('🎯 ENHANCED LOGGING: About to call startLive(true)');
+          await startLive(true);
+          console.log('🎯 ENHANCED LOGGING: startLive(true) completed');
+          
+          setProcessingDesktopMessage(false);
+        } else {
+          console.log('⚠️ ENHANCED LOGGING: Call already active or connecting, ignoring desktop trigger');
+          
+          // Still acknowledge the message to prevent reprocessing
+          try {
+            await fetch('/api/desktop-sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                type: 'message-ack',
+                messageId: message.id
+              })
+            });
+            console.log('✅ ENHANCED LOGGING: Message acknowledged (ignored due to active call)');
+          } catch (error) {
+            console.error('❌ ENHANCED LOGGING: Error acknowledging message:', error);
+          }
+        }
+        break;
+        
+      case 'desktop-call-stopped':
+        console.log('🛑 ENHANCED LOGGING: Desktop triggered call stop');
+        if (live) {
+          stopLive();
+        }
+        
+        // Acknowledge the message
+        try {
+          await fetch('/api/desktop-sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'message-ack',
+              messageId: message.id
+            })
+          });
+          console.log('✅ ENHANCED LOGGING: Stop message acknowledged successfully');
+        } catch (error) {
+          console.error('❌ ENHANCED LOGGING: Error acknowledging stop message:', error);
         }
         break;
         
