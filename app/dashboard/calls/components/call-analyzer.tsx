@@ -96,9 +96,9 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         // Check for pending messages from desktop
         if (data.connected && data.pendingMessages > 0) {
           console.log('📨 PENDING MESSAGES DEBUG: Found pending messages, fetching them...');
-          console.log('📨 PENDING MESSAGES DEBUG: About to fetch from /api/desktop-sync?action=get-messages');
+          console.log('📨 PENDING MESSAGES DEBUG: About to fetch from /api/desktop-sync?action=get-messages-for-webapp');
           
-          const messagesResponse = await fetch('/api/desktop-sync?action=get-messages');
+          const messagesResponse = await fetch('/api/desktop-sync?action=get-messages-for-webapp');
           const messagesData = await messagesResponse.json();
           
           console.log('📨 PENDING MESSAGES DEBUG: Messages response status:', messagesResponse.status);

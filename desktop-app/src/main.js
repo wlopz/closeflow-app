@@ -805,7 +805,7 @@ class CloseFlowDesktop {
 
   async pollWebAppMessages() {
     try {
-      const response = await fetch(`${this.webAppUrl}/api/desktop-sync?action=get-messages`, {
+      const response = await fetch(`${this.webAppUrl}/api/desktop-sync?action=get-messages-for-desktop`, {
         method: 'GET',
         signal: AbortSignal.timeout(3000)
       });

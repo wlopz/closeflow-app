@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
 
-// Simple in-memory store for desktop messages
-let desktopMessages: any[] = [];
+// Separate in-memory stores for bidirectional communication
+let webAppToDesktopMessages: any[] = []; // Messages from web app TO desktop app
+let desktopToWebAppMessages: any[] = []; // Messages from desktop app TO web app
 let webAppCallActive = false;
 let lastDesktopPing = 0;
 
@@ -10,7 +11,7 @@ function handleDesktopMessage(message: any) {
   console.log('📱 ENHANCED LOGGING: Received from desktop:', message);
   console.log('📱 ENHANCED LOGGING: Message type:', message.type);
   console.log('📱 ENHANCED LOGGING: Current timestamp:', Date.now());
-  console.log('📱 ENHANCED LOGGING: Current desktopMessages array length BEFORE processing:', desktopMessages.length);
+  console.log('📱 ENHANCED LOGGING: Current desktopToWebAppMessages array length BEFORE processing:', desktopToWebAppMessages.length);
   
   switch (message.type) {
     case 'start-call-analysis':
@@ -25,14 +26,14 @@ function handleDesktopMessage(message: any) {
         timestamp: message.timestamp
       };
       
-      console.log('🎯 ENHANCED LOGGING: About to push message to desktopMessages array');
+      console.log('🎯 ENHANCED LOGGING: About to push message to desktopToWebAppMessages array');
       console.log('🎯 ENHANCED LOGGING: Message to be stored:', startMessage);
       
-      desktopMessages.push(startMessage);
+      desktopToWebAppMessages.push(startMessage);
       
       console.log('🎯 ENHANCED LOGGING: Message pushed successfully');
-      console.log('🎯 ENHANCED LOGGING: desktopMessages array length AFTER push:', desktopMessages.length);
-      console.log('🎯 ENHANCED LOGGING: Current desktopMessages array contents:', desktopMessages);
+      console.log('🎯 ENHANCED LOGGING: desktopToWebAppMessages array length AFTER push:', desktopToWebAppMessages.length);
+      console.log('🎯 ENHANCED LOGGING: Current desktopToWebAppMessages array contents:', desktopToWebAppMessages);
       
       return { success: true, message: 'Call analysis request received' };
 
@@ -48,9 +49,9 @@ function handleDesktopMessage(message: any) {
         timestamp: message.timestamp
       };
       
-      console.log('🛑 ENHANCED LOGGING: About to push stop message to desktopMessages array');
-      desktopMessages.push(stopMessage);
-      console.log('🛑 ENHANCED LOGGING: Stop message pushed, array length now:', desktopMessages.length);
+      console.log('🛑 ENHANCED LOGGING: About to push stop message to desktopToWebAppMessages array');
+      desktopToWebAppMessages.push(stopMessage);
+      console.log('🛑 ENHANCED LOGGING: Stop message pushed, array length now:', desktopToWebAppMessages.length);
       
       return { success: true, message: 'Call analysis stopped' };
 
@@ -85,7 +86,7 @@ export async function GET(request: NextRequest) {
         activeConnections: isDesktopConnected ? 1 : 0,
         serverRunning: true,
         callActive: webAppCallActive,
-        pendingMessages: desktopMessages.length,
+        pendingMessages: webAppToDesktopMessages.length, // Desktop checks this queue
         lastPing: lastDesktopPing
       };
       
@@ -97,54 +98,72 @@ export async function GET(request: NextRequest) {
         threshold: 10000,
         isConnected: isDesktopConnected
       });
-      console.log('📊 ENHANCED LOGGING: Current desktopMessages array:', desktopMessages);
+      console.log('📊 ENHANCED LOGGING: Current webAppToDesktopMessages array:', webAppToDesktopMessages);
+      console.log('📊 ENHANCED LOGGING: Current desktopToWebAppMessages array:', desktopToWebAppMessages);
       
       return Response.json(statusResponse);
 
-    case 'get-messages':
-      console.log('📨 ENHANCED LOGGING: Get messages request received');
-      console.log('📨 ENHANCED LOGGING: Current desktopMessages array length:', desktopMessages.length);
-      console.log('📨 ENHANCED LOGGING: Messages to return:', desktopMessages);
+    case 'get-messages-for-webapp':
+      console.log('📨 ENHANCED LOGGING: Get messages for web app request received');
+      console.log('📨 ENHANCED LOGGING: Current desktopToWebAppMessages array length:', desktopToWebAppMessages.length);
+      console.log('📨 ENHANCED LOGGING: Messages to return to web app:', desktopToWebAppMessages);
       
-      // Return pending messages and clear them
-      const messages = [...desktopMessages];
-      console.log('📨 ENHANCED LOGGING: Created copy of messages:', messages);
+      // Return pending messages from desktop to web app and clear them
+      const webAppMessages = [...desktopToWebAppMessages];
+      console.log('📨 ENHANCED LOGGING: Created copy of messages for web app:', webAppMessages);
       
-      desktopMessages = [];
-      console.log('📨 ENHANCED LOGGING: Cleared desktopMessages array, new length:', desktopMessages.length);
+      desktopToWebAppMessages = [];
+      console.log('📨 ENHANCED LOGGING: Cleared desktopToWebAppMessages array, new length:', desktopToWebAppMessages.length);
       
-      const messagesResponse = { messages };
-      console.log('📨 ENHANCED LOGGING: Returning response:', messagesResponse);
+      const webAppMessagesResponse = { messages: webAppMessages };
+      console.log('📨 ENHANCED LOGGING: Returning response to web app:', webAppMessagesResponse);
       
-      return Response.json(messagesResponse);
+      return Response.json(webAppMessagesResponse);
+
+    case 'get-messages-for-desktop':
+      console.log('📨 ENHANCED LOGGING: Get messages for desktop request received');
+      console.log('📨 ENHANCED LOGGING: Current webAppToDesktopMessages array length:', webAppToDesktopMessages.length);
+      console.log('📨 ENHANCED LOGGING: Messages to return to desktop:', webAppToDesktopMessages);
+      
+      // Return pending messages from web app to desktop and clear them
+      const desktopMessages = [...webAppToDesktopMessages];
+      console.log('📨 ENHANCED LOGGING: Created copy of messages for desktop:', desktopMessages);
+      
+      webAppToDesktopMessages = [];
+      console.log('📨 ENHANCED LOGGING: Cleared webAppToDesktopMessages array, new length:', webAppToDesktopMessages.length);
+      
+      const desktopMessagesResponse = { messages: desktopMessages };
+      console.log('📨 ENHANCED LOGGING: Returning response to desktop:', desktopMessagesResponse);
+      
+      return Response.json(desktopMessagesResponse);
 
     case 'trigger-start':
       console.log('🚀 ENHANCED LOGGING: Trigger start request from web app');
       // Trigger call start from web app
       webAppCallActive = true;
-      desktopMessages.push({
+      webAppToDesktopMessages.push({
         type: 'web-call-started',
         timestamp: Date.now()
       });
-      console.log('🚀 ENHANCED LOGGING: Added web-call-started message, array length:', desktopMessages.length);
+      console.log('🚀 ENHANCED LOGGING: Added web-call-started message, array length:', webAppToDesktopMessages.length);
       return Response.json({ success: true, message: 'Start signal sent to desktop' });
 
     case 'trigger-stop':
       console.log('🛑 ENHANCED LOGGING: Trigger stop request from web app');
       // Trigger call stop from web app
       webAppCallActive = false;
-      desktopMessages.push({
+      webAppToDesktopMessages.push({
         type: 'web-call-stopped',
         timestamp: Date.now()
       });
-      console.log('🛑 ENHANCED LOGGING: Added web-call-stopped message, array length:', desktopMessages.length);
+      console.log('🛑 ENHANCED LOGGING: Added web-call-stopped message, array length:', webAppToDesktopMessages.length);
       return Response.json({ success: true, message: 'Stop signal sent to desktop' });
 
     default:
       console.log('❓ ENHANCED LOGGING: Invalid GET action:', action);
       return Response.json({ 
         error: 'Invalid action',
-        availableActions: ['status', 'get-messages', 'trigger-start', 'trigger-stop']
+        availableActions: ['status', 'get-messages-for-webapp', 'get-messages-for-desktop', 'trigger-start', 'trigger-stop']
       });
   }
 }
@@ -181,10 +200,10 @@ export async function POST(request: NextRequest) {
           timestamp: Date.now()
         };
         
-        console.log('✅ ENHANCED LOGGING: Adding start confirmation to messages array');
-        desktopMessages.push(startConfirmation);
-        console.log('✅ ENHANCED LOGGING: Start confirmation added, array length:', desktopMessages.length);
-        console.log('✅ ENHANCED LOGGING: Current messages array:', desktopMessages);
+        console.log('✅ ENHANCED LOGGING: Adding start confirmation to webAppToDesktopMessages array');
+        webAppToDesktopMessages.push(startConfirmation);
+        console.log('✅ ENHANCED LOGGING: Start confirmation added, array length:', webAppToDesktopMessages.length);
+        console.log('✅ ENHANCED LOGGING: Current webAppToDesktopMessages array:', webAppToDesktopMessages);
         
         return Response.json({ success: true });
 
@@ -199,10 +218,10 @@ export async function POST(request: NextRequest) {
           timestamp: Date.now()
         };
         
-        console.log('✅ ENHANCED LOGGING: Adding stop confirmation to messages array');
-        desktopMessages.push(stopConfirmation);
-        console.log('✅ ENHANCED LOGGING: Stop confirmation added, array length:', desktopMessages.length);
-        console.log('✅ ENHANCED LOGGING: Current messages array:', desktopMessages);
+        console.log('✅ ENHANCED LOGGING: Adding stop confirmation to webAppToDesktopMessages array');
+        webAppToDesktopMessages.push(stopConfirmation);
+        console.log('✅ ENHANCED LOGGING: Stop confirmation added, array length:', webAppToDesktopMessages.length);
+        console.log('✅ ENHANCED LOGGING: Current webAppToDesktopMessages array:', webAppToDesktopMessages);
         
         return Response.json({ success: true });
 
@@ -212,13 +231,13 @@ export async function POST(request: NextRequest) {
         console.log('🧠 ENHANCED LOGGING: Insight type:', body.insightType);
         
         // Store insight for desktop to pick up
-        desktopMessages.push({
+        webAppToDesktopMessages.push({
           type: 'insight-generated',
           content: body.content,
           insightType: body.insightType,
           timestamp: Date.now()
         });
-        console.log('🧠 ENHANCED LOGGING: Insight added to messages, array length:', desktopMessages.length);
+        console.log('🧠 ENHANCED LOGGING: Insight added to webAppToDesktopMessages, array length:', webAppToDesktopMessages.length);
         return Response.json({ success: true });
 
       case 'call-status-update':
@@ -227,13 +246,13 @@ export async function POST(request: NextRequest) {
         console.log('📞 ENHANCED LOGGING: Call ID:', body.callId);
         
         // Store status update for desktop to pick up
-        desktopMessages.push({
+        webAppToDesktopMessages.push({
           type: 'call-status-update',
           status: body.status,
           callId: body.callId,
           timestamp: Date.now()
         });
-        console.log('📞 ENHANCED LOGGING: Status update added to messages, array length:', desktopMessages.length);
+        console.log('📞 ENHANCED LOGGING: Status update added to webAppToDesktopMessages, array length:', webAppToDesktopMessages.length);
         return Response.json({ success: true });
 
       default:
