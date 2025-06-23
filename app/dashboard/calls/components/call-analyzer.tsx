@@ -458,8 +458,14 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         }));
         
         // CRITICAL: Send confirmation to desktop app that call analysis is truly active
+        console.log('🔄 ENHANCED LOGGING: About to send call started confirmation to desktop app');
+        console.log('🔄 ENHANCED LOGGING: Current timestamp:', Date.now());
+        console.log('🔄 ENHANCED LOGGING: Desktop triggered flag:', desktopTriggered);
+        
         try {
-          await fetch('/api/desktop-sync', {
+          console.log('🔄 ENHANCED LOGGING: Making fetch request to /api/desktop-sync');
+          
+          const confirmationResponse = await fetch('/api/desktop-sync', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -467,13 +473,38 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
               timestamp: Date.now()
             })
           });
-          console.log('✅ Sent call started confirmation to desktop');
-        } catch (error) {
-          console.error('Error sending confirmation to desktop:', error);
+          
+          console.log('🔄 ENHANCED LOGGING: Fetch response received');
+          console.log('🔄 ENHANCED LOGGING: Response status:', confirmationResponse.status);
+          console.log('🔄 ENHANCED LOGGING: Response ok:', confirmationResponse.ok);
+          console.log('🔄 ENHANCED LOGGING: Response headers:', Object.fromEntries(confirmationResponse.headers.entries()));
+          
+          if (confirmationResponse.ok) {
+            const confirmationData = await confirmationResponse.json();
+            console.log('✅ ENHANCED LOGGING: Successfully sent call started confirmation to desktop');
+            console.log('✅ ENHANCED LOGGING: Confirmation response data:', confirmationData);
+          } else {
+            const errorText = await confirmationResponse.text();
+            console.error('❌ ENHANCED LOGGING: Failed to send confirmation - HTTP error');
+            console.error('❌ ENHANCED LOGGING: Error status:', confirmationResponse.status);
+            console.error('❌ ENHANCED LOGGING: Error text:', errorText);
+          }
+        } catch (confirmationError) {
+          console.error('❌ ENHANCED LOGGING: Error sending confirmation to desktop:', confirmationError);
+          console.error('❌ ENHANCED LOGGING: Error name:', confirmationError.name);
+          console.error('❌ ENHANCED LOGGING: Error message:', confirmationError.message);
+          console.error('❌ ENHANCED LOGGING: Error stack:', confirmationError.stack);
+          
+          // Check if it's a network error
+          if (confirmationError instanceof TypeError && confirmationError.message.includes('fetch')) {
+            console.error('❌ ENHANCED LOGGING: This appears to be a network connectivity issue');
+            console.error('❌ ENHANCED LOGGING: Check if the Next.js server is running on the expected port');
+          }
         }
       };
 
       ws.onerror = () => {
+        console.error('❌ ENHANCED LOGGING: WebSocket connection error occurred');
         setConnecting(false);
         stopLive();
       };
@@ -535,8 +566,12 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         setConnecting(false);
         
         // CRITICAL: Send confirmation to desktop app that call analysis has stopped
+        console.log('🔄 ENHANCED LOGGING: About to send call stopped confirmation to desktop app');
+        
         try {
-          await fetch('/api/desktop-sync', {
+          console.log('🔄 ENHANCED LOGGING: Making fetch request to send stop confirmation');
+          
+          const stopConfirmationResponse = await fetch('/api/desktop-sync', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -544,9 +579,26 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
               timestamp: Date.now()
             })
           });
-          console.log('✅ Sent call stopped confirmation to desktop');
-        } catch (error) {
-          console.error('Error sending stop confirmation to desktop:', error);
+          
+          console.log('🔄 ENHANCED LOGGING: Stop confirmation response status:', stopConfirmationResponse.status);
+          console.log('🔄 ENHANCED LOGGING: Stop confirmation response ok:', stopConfirmationResponse.ok);
+          
+          if (stopConfirmationResponse.ok) {
+            const stopConfirmationData = await stopConfirmationResponse.json();
+            console.log('✅ ENHANCED LOGGING: Successfully sent call stopped confirmation to desktop');
+            console.log('✅ ENHANCED LOGGING: Stop confirmation response data:', stopConfirmationData);
+          } else {
+            const stopErrorText = await stopConfirmationResponse.text();
+            console.error('❌ ENHANCED LOGGING: Failed to send stop confirmation');
+            console.error('❌ ENHANCED LOGGING: Stop error text:', stopErrorText);
+          }
+        } catch (stopConfirmationError) {
+          console.error('❌ ENHANCED LOGGING: Error sending stop confirmation to desktop:', stopConfirmationError);
+          console.error('❌ ENHANCED LOGGING: Stop error details:', {
+            name: stopConfirmationError.name,
+            message: stopConfirmationError.message,
+            stack: stopConfirmationError.stack
+          });
         }
         
         // End call session in database and show feedback modal
