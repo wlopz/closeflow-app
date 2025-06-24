@@ -5,10 +5,11 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --dev",
+    "dev": "CLOSEFLOW_WEB_APP_URL=http://localhost:3000 electron . --dev",
     "test-capturer": "electron test-desktop-capturer.js",
     "build": "electron-builder",
     "build:mac": "electron-builder --mac",
+    "build:production": "CLOSEFLOW_WEB_APP_URL=$PRODUCTION_WEB_APP_URL electron-builder --mac",
     "pack": "electron-builder --dir",
     "dist": "electron-builder"
   },

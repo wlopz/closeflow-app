@@ -20,7 +20,11 @@ class CloseFlowDesktop {
     this.connectionCheckInterval = null;
     this.messagePollingInterval = null;
     this.isConnected = false;
-    this.webAppUrl = 'http://localhost:3000';
+    
+    // ENHANCED: Dynamic web app URL configuration
+    this.webAppUrl = this.getWebAppUrl();
+    console.log('🌐 ENHANCED LOGGING: Web app URL configured as:', this.webAppUrl);
+    
     this.pingInterval = null;
     this.isStartingCall = false;
     this.isStoppingCall = false;
@@ -34,6 +38,30 @@ class CloseFlowDesktop {
     
     // Add flag to track if renderer is ready
     this.rendererReady = false;
+  }
+
+  // NEW: Get web app URL based on environment
+  getWebAppUrl() {
+    // Check for environment variable first (production)
+    const envUrl = process.env.CLOSEFLOW_WEB_APP_URL;
+    if (envUrl) {
+      console.log('🌐 Using web app URL from environment variable:', envUrl);
+      return envUrl;
+    }
+    
+    // Check for command line argument (for manual override)
+    const args = process.argv;
+    const urlArgIndex = args.findIndex(arg => arg.startsWith('--web-app-url='));
+    if (urlArgIndex !== -1) {
+      const urlFromArg = args[urlArgIndex].split('=')[1];
+      console.log('🌐 Using web app URL from command line argument:', urlFromArg);
+      return urlFromArg;
+    }
+    
+    // Default to localhost for development
+    const defaultUrl = 'http://localhost:3000';
+    console.log('🌐 Using default web app URL for development:', defaultUrl);
+    return defaultUrl;
   }
 
   async initialize() {
@@ -251,7 +279,8 @@ class CloseFlowDesktop {
           audioLevels: this.audioLevels,
           webAppConnected: this.isConnected,
           isStartingCall: this.isStartingCall,
-          isStoppingCall: this.isStoppingCall
+          isStoppingCall: this.isStoppingCall,
+          webAppUrl: this.webAppUrl // NEW: Include web app URL in status
         };
       } catch (error) {
         console.error('Error in get-status handler:', error);
@@ -908,6 +937,8 @@ class CloseFlowDesktop {
 
   async checkWebAppConnection() {
     try {
+      console.log('🔍 ENHANCED LOGGING: Checking web app connection to:', this.webAppUrl);
+      
       const response = await fetch(`${this.webAppUrl}/api/desktop-sync?action=status`, {
         method: 'GET',
         signal: AbortSignal.timeout(5000)
@@ -919,7 +950,7 @@ class CloseFlowDesktop {
         this.isConnected = true;
         
         if (!wasConnected) {
-          console.log('✅ Connected to CloseFlow web app');
+          console.log('✅ Connected to CloseFlow web app at:', this.webAppUrl);
           this.updateConnectionStatus('connected');
           this.updateTrayMenu();
         }
@@ -932,6 +963,7 @@ class CloseFlowDesktop {
       
       if (wasConnected) {
         console.log('❌ Lost connection to web app:', error.message);
+        console.log('❌ Web app URL was:', this.webAppUrl);
         this.updateConnectionStatus('disconnected');
         this.updateTrayMenu();
       }
@@ -984,6 +1016,8 @@ class CloseFlowDesktop {
       }
 
       // Send message to web app via HTTP
+      console.log('🌐 ENHANCED LOGGING: Sending start request to web app at:', this.webAppUrl);
+      
       const response = await fetch(`${this.webAppUrl}/api/desktop-sync`, {
         method: 'POST',
         headers: {
@@ -1079,6 +1113,8 @@ class CloseFlowDesktop {
       this.systemAudioCapture.stopCapture();
       
       // Send message to web app via HTTP
+      console.log('🌐 ENHANCED LOGGING: Sending stop request to web app at:', this.webAppUrl);
+      
       const response = await fetch(`${this.webAppUrl}/api/desktop-sync`, {
         method: 'POST',
         headers: {
@@ -1176,6 +1212,11 @@ class CloseFlowDesktop {
           label: this.isCallActive ? 'Call Analysis Active' : 'Start Call Analysis',
           enabled: this.isZoomDetected && !this.isCallActive && this.isConnected && !this.isStartingCall,
           click: () => this.startCallAnalysis()
+        },
+        { type: 'separator' },
+        {
+          label: `Web App: ${this.webAppUrl}`,
+          enabled: false
         },
         { type: 'separator' },
         {
