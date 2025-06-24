@@ -148,12 +148,9 @@ class AudioWebSocketServer {
           console.log('🎤 ENHANCED LOGGING: Deepgram ready flag:', this.deepgramReady);
           console.log('🎤 ENHANCED LOGGING: Transcription active flag:', this.transcriptionActive);
           
-          // CRITICAL: Only process audio if transcription is active
-          if (this.transcriptionActive) {
-            this.handleAudioData(data);
-          } else {
-            console.log('⚠️ ENHANCED LOGGING: Transcription not active, ignoring audio data');
-          }
+          // CRITICAL FIX: Always process audio data for buffering, regardless of transcriptionActive flag
+          // The transcriptionActive flag should only control Deepgram connection establishment
+          this.handleAudioData(data);
         } else {
           const message = JSON.parse(data);
           console.log('📨 ENHANCED LOGGING: Received control message from desktop renderer:', message.type);
