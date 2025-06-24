@@ -5,7 +5,7 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "CLOSEFLOW_WEB_APP_URL=http://localhost:3000 electron . --dev",
+    "dev": "electron . --dev",
     "test-capturer": "electron test-desktop-capturer.js",
     "build": "electron-builder",
     "build:mac": "electron-builder --mac",
