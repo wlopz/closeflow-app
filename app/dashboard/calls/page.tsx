@@ -17,14 +17,15 @@ import { CallHistoryDetailed } from '@/components/dashboard/call-history-detaile
 
 export default function CallsPage() {
   const [isCallActive, setIsCallActive] = useState(false);
+  const [isDesktopCallInitiated, setIsDesktopCallInitiated] = useState(false);
   const [isDesktopCallActiveFromAnalyzer, setIsDesktopCallActiveFromAnalyzer] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [desktopConnected, setDesktopConnected] = useState(false);
   
-  // CRITICAL FIX: Use the analyzer state instead of polling-based state
-  const actualCallActive = isCallActive || isDesktopCallActiveFromAnalyzer;
+  // CRITICAL FIX: Include desktop call initiation in the derived state
+  const actualCallActive = isCallActive || isDesktopCallInitiated || isDesktopCallActiveFromAnalyzer;
   
   // Timer for call duration
   useEffect(() => {
@@ -41,30 +42,98 @@ export default function CallsPage() {
     return () => clearInterval(timer);
   }, [actualCallActive]);
 
-  // Check desktop connection status
+  // CRITICAL FIX: Proactive desktop message polling and processing
   useEffect(() => {
     const checkDesktopStatus = async () => {
       try {
-        console.log('📊 ENHANCED LOGGING: Checking desktop status from calls page');
+        console.log('📊 ENHANCED LOGGING: CallsPage checking desktop status');
         
         const response = await fetch('/api/desktop-sync?action=status');
         const data = await response.json();
         
         console.log('📊 ENHANCED LOGGING: Desktop status response:', data);
         console.log('📊 ENHANCED LOGGING: Connected:', data.connected);
+        console.log('📊 ENHANCED LOGGING: Pending web app messages:', data.pendingWebAppMessages);
         
         setDesktopConnected(data.connected);
         
+        // CRITICAL: Proactively check for desktop call initiation messages
+        if (data.connected && data.pendingWebAppMessages > 0) {
+          console.log('📨 ENHANCED LOGGING: Found pending messages for web app, fetching...');
+          
+          const messagesResponse = await fetch('/api/desktop-sync?action=get-messages-for-webapp');
+          
+          if (messagesResponse.ok) {
+            const messagesData = await messagesResponse.json();
+            console.log('📨 ENHANCED LOGGING: Messages received:', messagesData.messages);
+            
+            // Process each message
+            for (const message of messagesData.messages) {
+              console.log('📨 ENHANCED LOGGING: Processing message:', message);
+              
+              if (message.type === 'desktop-call-started') {
+                console.log('🎯 ENHANCED LOGGING: Desktop call started message detected in CallsPage');
+                
+                // CRITICAL: Set desktop call initiated immediately
+                setIsDesktopCallInitiated(true);
+                
+                // CRITICAL: Acknowledge the message to prevent reprocessing
+                try {
+                  await fetch('/api/desktop-sync', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      type: 'message-ack',
+                      messageId: message.id
+                    })
+                  });
+                  console.log('✅ ENHANCED LOGGING: Message acknowledged by CallsPage');
+                } catch (error) {
+                  console.error('❌ ENHANCED LOGGING: Error acknowledging message:', error);
+                }
+              } else if (message.type === 'desktop-call-stopped') {
+                console.log('🛑 ENHANCED LOGGING: Desktop call stopped message detected in CallsPage');
+                
+                // Reset desktop call states
+                setIsDesktopCallInitiated(false);
+                setIsDesktopCallActiveFromAnalyzer(false);
+                
+                // Acknowledge the message
+                try {
+                  await fetch('/api/desktop-sync', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      type: 'message-ack',
+                      messageId: message.id
+                    })
+                  });
+                  console.log('✅ ENHANCED LOGGING: Stop message acknowledged by CallsPage');
+                } catch (error) {
+                  console.error('❌ ENHANCED LOGGING: Error acknowledging stop message:', error);
+                }
+              }
+            }
+          }
+        }
+        
+        // CRITICAL: Reset desktop call initiation if desktop reports no active call
+        if (data.connected && !data.callActive && isDesktopCallInitiated && !isDesktopCallActiveFromAnalyzer) {
+          console.log('⚠️ ENHANCED LOGGING: Desktop reports no active call, resetting initiation state');
+          setIsDesktopCallInitiated(false);
+        }
+        
       } catch (error) {
-        console.error('❌ ENHANCED LOGGING: Error checking desktop status from calls page:', error);
+        console.error('❌ ENHANCED LOGGING: Error checking desktop status from CallsPage:', error);
         setDesktopConnected(false);
+        setIsDesktopCallInitiated(false);
       }
     };
 
     checkDesktopStatus();
-    const interval = setInterval(checkDesktopStatus, 3000); // Check every 3 seconds
+    const interval = setInterval(checkDesktopStatus, 2000); // Check every 2 seconds for fast response
     return () => clearInterval(interval);
-  }, []);
+  }, [isDesktopCallInitiated, isDesktopCallActiveFromAnalyzer]);
   
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -81,15 +150,21 @@ export default function CallsPage() {
     }
   };
 
-  // NEW: Callback to handle desktop call state changes from CallAnalyzer
+  // CRITICAL: Callback to handle desktop call state changes from CallAnalyzer
   const handleDesktopCallStateChange = (isActive: boolean) => {
     console.log('📞 ENHANCED LOGGING: Desktop call state change from analyzer:', isActive);
     setIsDesktopCallActiveFromAnalyzer(isActive);
+    
+    // If the analyzer reports the call is no longer active, also reset the initiation state
+    if (!isActive) {
+      setIsDesktopCallInitiated(false);
+    }
   };
 
   const handleCallEnd = () => {
     console.log('📞 ENHANCED LOGGING: handleCallEnd called');
     setIsCallActive(false);
+    setIsDesktopCallInitiated(false); // CRITICAL: Reset desktop call initiation
     setIsDesktopCallActiveFromAnalyzer(false); // CRITICAL: Reset desktop call state
     setElapsedTime(0);
     // Trigger refresh of call history
@@ -129,7 +204,8 @@ export default function CallsPage() {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
                 </span>
-                {isDesktopCallActiveFromAnalyzer ? 'Desktop Call' : 'Live Call'} - {formatTime(elapsedTime)}
+                {isDesktopCallActiveFromAnalyzer ? 'Desktop Call' : 
+                 isDesktopCallInitiated ? 'Desktop Initiating' : 'Live Call'} - {formatTime(elapsedTime)}
               </div>
             </Badge>
           )}
@@ -142,9 +218,9 @@ export default function CallsPage() {
             <div className="flex items-center gap-2">
               <Headphones className="h-5 w-5 text-primary" />
               <h2 className="font-semibold">Call Session</h2>
-              {isDesktopCallActiveFromAnalyzer && (
+              {(isDesktopCallInitiated || isDesktopCallActiveFromAnalyzer) && (
                 <Badge variant="secondary" className="text-xs">
-                  Desktop Triggered
+                  {isDesktopCallActiveFromAnalyzer ? 'Desktop Active' : 'Desktop Initiated'}
                 </Badge>
               )}
             </div>
@@ -167,7 +243,7 @@ export default function CallsPage() {
                 variant={actualCallActive ? "destructive" : "default"}
                 onClick={handleCallToggle}
                 className="gap-2"
-                disabled={isDesktopCallActiveFromAnalyzer} // Disable if desktop is controlling the call
+                disabled={isDesktopCallInitiated || isDesktopCallActiveFromAnalyzer} // Disable if desktop is controlling the call
               >
                 <Phone className="h-4 w-4" />
                 {actualCallActive ? "End Call" : "Start Call"}
@@ -181,8 +257,13 @@ export default function CallsPage() {
                 <div className="mb-4 text-sm text-muted-foreground">
                   {isDesktopCallActiveFromAnalyzer ? (
                     <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                       CallAnalyzer is actively managing desktop call
+                    </div>
+                  ) : isDesktopCallInitiated ? (
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                      Desktop call initiated - CallAnalyzer is starting up
                     </div>
                   ) : (
                     'CallAnalyzer is active for manual call'
@@ -191,6 +272,7 @@ export default function CallsPage() {
                 <CallAnalyzer 
                   onCallEnd={handleCallEnd}
                   onDesktopCallStateChange={handleDesktopCallStateChange}
+                  isDesktopInitiatedCall={isDesktopCallInitiated}
                 />
               </div>
             ) : (

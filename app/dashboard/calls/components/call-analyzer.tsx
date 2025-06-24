@@ -48,9 +48,10 @@ const SPEAKER_COLORS = [
 interface CallAnalyzerProps {
   onCallEnd?: () => void;
   onDesktopCallStateChange?: (isActive: boolean) => void;
+  isDesktopInitiatedCall?: boolean;
 }
 
-export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange }: CallAnalyzerProps) {
+export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopInitiatedCall }: CallAnalyzerProps) {
   const [live, setLive] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -58,10 +59,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange }: CallAnalyz
   const [currentCallId, setCurrentCallId] = useState<string | null>(null);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [callStartTime, setCallStartTime] = useState<number>(0);
-  const [desktopTriggered, setDesktopTriggered] = useState(false);
   const [desktopConnected, setDesktopConnected] = useState(false);
-  const [authenticationLoading, setAuthenticationLoading] = useState(true);
-  const [pendingDesktopCallMessageId, setPendingDesktopCallMessageId] = useState<string | null>(null);
   
   // State for building complete conversations
   const [currentSpeaker, setCurrentSpeaker] = useState<number | null>(null);
@@ -81,204 +79,57 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange }: CallAnalyz
   const { toast } = useToast();
   const { user, loading } = useAuth();
 
-  // Update authentication loading state when auth state changes
+  // CRITICAL FIX: React to desktop call initiation from parent
   useEffect(() => {
-    console.log('🔐 ENHANCED LOGGING: Auth loading state changed:', loading);
-    console.log('🔐 ENHANCED LOGGING: User state:', user ? 'authenticated' : 'not authenticated');
-    setAuthenticationLoading(loading);
-  }, [loading, user]);
-
-  // Process pending desktop call when authentication is complete
-  useEffect(() => {
-    const processPendingCall = async () => {
-      // Only proceed if we have a pending call, authentication is complete, and user is logged in
-      if (pendingDesktopCallMessageId && !authenticationLoading && user) {
-        console.log('🔄 ENHANCED LOGGING: Processing pending desktop call message:', pendingDesktopCallMessageId);
-        console.log('🔄 ENHANCED LOGGING: Authentication is complete and user is logged in');
+    const handleDesktopInitiation = async () => {
+      console.log('🎯 ENHANCED LOGGING: CallAnalyzer checking desktop initiation');
+      console.log('🎯 ENHANCED LOGGING: isDesktopInitiatedCall:', isDesktopInitiatedCall);
+      console.log('🎯 ENHANCED LOGGING: Current state:', { live, connecting, loading });
+      console.log('🎯 ENHANCED LOGGING: User authenticated:', !!user);
+      
+      // Only proceed if desktop initiated, not already live/connecting, auth is complete, and user is authenticated
+      if (isDesktopInitiatedCall && !live && !connecting && !loading && user) {
+        console.log('🎯 ENHANCED LOGGING: All conditions met, starting live analysis for desktop call');
         
-        // Start the call
+        // Signal to parent that we're now actively handling the desktop call
+        if (onDesktopCallStateChange) {
+          onDesktopCallStateChange(true);
+        }
+        
+        // Start the live analysis
         await startLive(true);
+      } else if (isDesktopInitiatedCall && loading) {
+        console.log('⏳ ENHANCED LOGGING: Desktop call initiated but authentication still loading');
+      } else if (isDesktopInitiatedCall && !user) {
+        console.log('❌ ENHANCED LOGGING: Desktop call initiated but no authenticated user');
         
-        // Clear the pending message ID to prevent reprocessing
-        setPendingDesktopCallMessageId(null);
+        // Signal to parent that we can't handle the desktop call
+        if (onDesktopCallStateChange) {
+          onDesktopCallStateChange(false);
+        }
       }
     };
     
-    processPendingCall();
-  }, [pendingDesktopCallMessageId, authenticationLoading, user]);
+    handleDesktopInitiation();
+  }, [isDesktopInitiatedCall, live, connecting, loading, user]);
 
-  // Check desktop connection status and listen for desktop triggers
+  // Check desktop connection status
   useEffect(() => {
     const checkDesktopConnection = async () => {
       try {
-        console.log('🔍 ENHANCED LOGGING: Checking desktop connection status...');
-        console.log('🔍 ENHANCED LOGGING: Making request to /api/desktop-sync?action=status');
-        
         const response = await fetch('/api/desktop-sync?action=status');
-        
-        console.log('🔍 ENHANCED LOGGING: Desktop status response received');
-        console.log('🔍 ENHANCED LOGGING: Response status:', response.status);
-        console.log('🔍 ENHANCED LOGGING: Response ok:', response.ok);
-        
-        if (response.ok) {
-          const data = await response.json();
-          console.log('🔍 ENHANCED LOGGING: Desktop status data:', data);
-          
-          // Enhanced logging for debugging
-          console.log('🔍 PENDING MESSAGES DEBUG: Checking desktop status');
-          console.log('🔍 PENDING MESSAGES DEBUG: Connected:', data.connected);
-          console.log('🔍 PENDING MESSAGES DEBUG: Pending messages for desktop:', data.pendingMessages);
-          console.log('🔍 PENDING MESSAGES DEBUG: Pending messages for web app:', data.pendingWebAppMessages);
-          console.log('🔍 PENDING MESSAGES DEBUG: Call active:', data.callActive);
-          console.log('🔍 PENDING MESSAGES DEBUG: Full response data:', data);
-          
-          setDesktopConnected(data.connected);
-          
-          // Check for pending messages from desktop
-          if (data.connected && data.pendingWebAppMessages > 0) {
-            console.log('📨 PENDING MESSAGES DEBUG: Found pending messages for web app, fetching them...');
-            console.log('📨 PENDING MESSAGES DEBUG: About to fetch from /api/desktop-sync?action=get-messages-for-webapp');
-            
-            const messagesResponse = await fetch('/api/desktop-sync?action=get-messages-for-webapp');
-            
-            console.log('📨 PENDING MESSAGES DEBUG: Messages response status:', messagesResponse.status);
-            console.log('📨 PENDING MESSAGES DEBUG: Messages response ok:', messagesResponse.ok);
-            
-            if (messagesResponse.ok) {
-              const messagesData = await messagesResponse.json();
-              console.log('📨 PENDING MESSAGES DEBUG: Messages data:', messagesData);
-              console.log('📨 PENDING MESSAGES DEBUG: Number of messages received:', messagesData.messages.length);
-              
-              for (const message of messagesData.messages) {
-                console.log('📨 PENDING MESSAGES DEBUG: Processing message:', message);
-                await handleDesktopMessage(message);
-              }
-            }
-          } else {
-            console.log('⚠️ PENDING MESSAGES DEBUG: Desktop connected but no pending messages for web app');
-          }
-        }
+        const data = await response.json();
+        setDesktopConnected(data.connected);
       } catch (error) {
-        console.error('❌ ENHANCED LOGGING: Error checking desktop status:', error);
+        console.error('Error checking desktop status:', error);
         setDesktopConnected(false);
-        setDesktopTriggered(false);
       }
     };
 
     checkDesktopConnection();
-    const interval = setInterval(checkDesktopConnection, 2000); // Check every 2 seconds for fast response
-    
+    const interval = setInterval(checkDesktopConnection, 3000);
     return () => clearInterval(interval);
   }, []);
-
-  const handleDesktopMessage = async (message: any) => {
-    console.log('📱 ENHANCED LOGGING: CallAnalyzer received desktop message:', message);
-    console.log('📱 ENHANCED LOGGING: Message type:', message.type);
-    console.log('📱 ENHANCED LOGGING: Current live state:', live);
-    console.log('📱 ENHANCED LOGGING: Current connecting state:', connecting);
-    
-    switch (message.type) {
-      case 'desktop-call-started':
-        console.log('🎯 ENHANCED LOGGING: Desktop triggered call start - starting live analysis immediately');
-        console.log('🎯 ENHANCED LOGGING: Device settings:', message.deviceSettings);
-        console.log('🎯 ENHANCED LOGGING: Current state before start:', { live, connecting });
-        
-        // Only proceed if not already in a call and not currently connecting
-        if (!live && !connecting) {
-          console.log('🎯 ENHANCED LOGGING: Conditions met, setting desktop triggered and starting live analysis');
-          setDesktopTriggered(true);
-          
-          // CRITICAL: Signal to parent that desktop call is now active
-          if (onDesktopCallStateChange) {
-            onDesktopCallStateChange(true);
-          }
-          
-          // CRITICAL FIX: Acknowledge the message immediately to prevent it from being processed again
-          try {
-            await fetch('/api/desktop-sync', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                type: 'message-ack',
-                messageId: message.id
-              })
-            });
-            console.log('✅ ENHANCED LOGGING: Message acknowledged immediately');
-          } catch (error) {
-            console.error('❌ ENHANCED LOGGING: Error acknowledging message:', error);
-          }
-          
-          // CRITICAL FIX: Instead of starting immediately, check authentication state
-          if (authenticationLoading) {
-            console.log('⏳ ENHANCED LOGGING: Authentication still loading, queueing desktop call request');
-            // Store the message ID to process once authentication is complete
-            setPendingDesktopCallMessageId(message.id);
-          } else if (!user) {
-            console.log('❌ ENHANCED LOGGING: No authenticated user, cannot start call');
-            toast({
-              variant: 'destructive',
-              title: 'Authentication required',
-              description: 'Please log in to start a call session.'
-            });
-            // Signal to parent that desktop call is no longer active
-            if (onDesktopCallStateChange) {
-              onDesktopCallStateChange(false);
-            }
-            setDesktopTriggered(false);
-          } else {
-            // Authentication is complete and user is logged in, start the call immediately
-            console.log('🎯 ENHANCED LOGGING: Authentication ready, starting live analysis immediately');
-            console.log('🎯 ENHANCED LOGGING: About to call startLive(true)');
-            await startLive(true);
-            console.log('🎯 ENHANCED LOGGING: startLive(true) completed');
-          }
-        } else {
-          console.log('⚠️ ENHANCED LOGGING: Call already active or connecting, ignoring desktop trigger');
-          
-          // Still acknowledge the message to prevent reprocessing
-          try {
-            await fetch('/api/desktop-sync', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                type: 'message-ack',
-                messageId: message.id
-              })
-            });
-            console.log('✅ ENHANCED LOGGING: Message acknowledged (ignored due to active call)');
-          } catch (error) {
-            console.error('❌ ENHANCED LOGGING: Error acknowledging message:', error);
-          }
-        }
-        break;
-        
-      case 'desktop-call-stopped':
-        console.log('🛑 ENHANCED LOGGING: Desktop triggered call stop');
-        if (live) {
-          stopLive();
-        }
-        
-        // Acknowledge the message
-        try {
-          await fetch('/api/desktop-sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              type: 'message-ack',
-              messageId: message.id
-            })
-          });
-          console.log('✅ ENHANCED LOGGING: Stop message acknowledged successfully');
-        } catch (error) {
-          console.error('❌ ENHANCED LOGGING: Error acknowledging stop message:', error);
-        }
-        break;
-        
-      case 'insight-generated':
-        // Handle insights from desktop if needed
-        break;
-    }
-  };
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -513,7 +364,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange }: CallAnalyz
       console.log('🔐 ENHANCED LOGGING: Creating call with user ID:', user.id);
       const call = await CallsService.createCall({
         user_id: user.id,
-        customer_name: desktopTriggered ? 'Desktop Zoom Call' : 'Live Call Session',
+        customer_name: isDesktopInitiatedCall ? 'Desktop Zoom Call' : 'Live Call Session',
         status: 'active'
       });
 
@@ -578,7 +429,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange }: CallAnalyz
   // Connect to local WebSocket server instead of Deepgram directly
   async function connectWithRetry() {
     console.log('🔗 ENHANCED LOGGING: Starting connectWithRetry function');
-    console.log('🔗 ENHANCED LOGGING: Current state:', { live, connecting, desktopTriggered });
+    console.log('🔗 ENHANCED LOGGING: Current state:', { live, connecting });
     
     const token = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
     if (!token) {
@@ -742,6 +593,11 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange }: CallAnalyz
           console.error('Error sending stop confirmation to desktop:', error);
         }
         
+        // Signal to parent that desktop call is no longer active
+        if (onDesktopCallStateChange) {
+          onDesktopCallStateChange(false);
+        }
+        
         // End call session in database and show feedback modal
         if (currentCallId) {
           endCallSession(currentCallId);
@@ -767,13 +623,8 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange }: CallAnalyz
     console.log('🎯 ENHANCED LOGGING: Current state:', { live, connecting });
     
     // Check authentication state before proceeding
-    if (authenticationLoading) {
+    if (loading) {
       console.log('⏳ ENHANCED LOGGING: Authentication still loading, cannot start call');
-      
-      // If triggered by desktop, we'll queue it for processing later
-      if (triggeredByDesktop) {
-        return;
-      }
       
       toast({
         variant: 'destructive',
@@ -786,22 +637,12 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange }: CallAnalyz
     if (!user) {
       console.log('❌ ENHANCED LOGGING: No authenticated user, cannot start call');
       
-      // If triggered by desktop, we'll just return without showing a toast
-      if (triggeredByDesktop) {
-        return;
-      }
-      
       toast({
         variant: 'destructive',
         title: 'Authentication required',
         description: 'Please log in to start a call session.'
       });
       return;
-    }
-    
-    // Set desktop triggered state if applicable
-    if (triggeredByDesktop) {
-      setDesktopTriggered(true);
     }
     
     // For desktop-triggered calls, we don't need microphone access
@@ -870,8 +711,6 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange }: CallAnalyz
     
     setLive(false);
     setConnecting(false);
-    setDesktopTriggered(false);
-    setPendingDesktopCallMessageId(null);
     
     // CRITICAL: Signal to parent that desktop call is no longer active
     if (onDesktopCallStateChange) {
@@ -890,7 +729,6 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange }: CallAnalyz
     setShowFeedbackModal(false);
     setCurrentCallId(null);
     setCallStartTime(0);
-    setDesktopTriggered(false);
     
     // Trigger refresh in parent component
     if (onCallEnd) {
@@ -1117,7 +955,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange }: CallAnalyz
   useEffect(() => () => stopLive(), []);
 
   // Render authentication loading state
-  if (authenticationLoading) {
+  if (loading) {
     return (
       <div className="flex flex-col items-center justify-center p-8 h-[400px]">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
@@ -1149,7 +987,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange }: CallAnalyz
           <Button
             onClick={live ? stopLive : () => startLive()}
             variant={live ? 'destructive' : 'default'}
-            disabled={connecting || desktopTriggered}
+            disabled={connecting}
           >
             {connecting ? (
               'Connecting...'
@@ -1175,10 +1013,10 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange }: CallAnalyz
               )}></div>
               Desktop {desktopConnected ? 'Connected' : 'Disconnected'}
             </div>
-            {desktopTriggered && (
+            {isDesktopInitiatedCall && (
               <div className="text-sm text-muted-foreground flex items-center gap-2">
                 <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                Desktop Triggered
+                Desktop Initiated
               </div>
             )}
             {currentCallId && (
