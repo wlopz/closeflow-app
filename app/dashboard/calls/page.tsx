@@ -17,14 +17,14 @@ import { CallHistoryDetailed } from '@/components/dashboard/call-history-detaile
 
 export default function CallsPage() {
   const [isCallActive, setIsCallActive] = useState(false);
-  const [hasPendingDesktopCall, setHasPendingDesktopCall] = useState(false);
+  const [isDesktopCallActiveFromAnalyzer, setIsDesktopCallActiveFromAnalyzer] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [desktopConnected, setDesktopConnected] = useState(false);
   
-  // Derived state: call is active if either local UI or desktop has pending/active call
-  const actualCallActive = isCallActive || hasPendingDesktopCall;
+  // CRITICAL FIX: Use the analyzer state instead of polling-based state
+  const actualCallActive = isCallActive || isDesktopCallActiveFromAnalyzer;
   
   // Timer for call duration
   useEffect(() => {
@@ -41,7 +41,7 @@ export default function CallsPage() {
     return () => clearInterval(timer);
   }, [actualCallActive]);
 
-  // Check desktop connection status and poll for call status
+  // Check desktop connection status
   useEffect(() => {
     const checkDesktopStatus = async () => {
       try {
@@ -52,32 +52,19 @@ export default function CallsPage() {
         
         console.log('📊 ENHANCED LOGGING: Desktop status response:', data);
         console.log('📊 ENHANCED LOGGING: Connected:', data.connected);
-        console.log('📊 ENHANCED LOGGING: Call active:', data.callActive);
-        console.log('📊 ENHANCED LOGGING: Pending web app messages:', data.pendingWebAppMessages);
         
         setDesktopConnected(data.connected);
-        
-        // CRITICAL FIX: Set hasPendingDesktopCall based on pending messages OR active call
-        const shouldShowCallAnalyzer = data.callActive || (data.connected && data.pendingWebAppMessages > 0);
-        
-        console.log('📊 ENHANCED LOGGING: Should show CallAnalyzer:', shouldShowCallAnalyzer);
-        console.log('📊 ENHANCED LOGGING: Previous hasPendingDesktopCall:', hasPendingDesktopCall);
-        
-        setHasPendingDesktopCall(shouldShowCallAnalyzer);
-        
-        console.log('📊 ENHANCED LOGGING: Updated hasPendingDesktopCall to:', shouldShowCallAnalyzer);
         
       } catch (error) {
         console.error('❌ ENHANCED LOGGING: Error checking desktop status from calls page:', error);
         setDesktopConnected(false);
-        setHasPendingDesktopCall(false);
       }
     };
 
     checkDesktopStatus();
-    const interval = setInterval(checkDesktopStatus, 2000); // Check every 2 seconds for fast response
+    const interval = setInterval(checkDesktopStatus, 3000); // Check every 3 seconds
     return () => clearInterval(interval);
-  }, [hasPendingDesktopCall]);
+  }, []);
   
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -94,10 +81,16 @@ export default function CallsPage() {
     }
   };
 
+  // NEW: Callback to handle desktop call state changes from CallAnalyzer
+  const handleDesktopCallStateChange = (isActive: boolean) => {
+    console.log('📞 ENHANCED LOGGING: Desktop call state change from analyzer:', isActive);
+    setIsDesktopCallActiveFromAnalyzer(isActive);
+  };
+
   const handleCallEnd = () => {
     console.log('📞 ENHANCED LOGGING: handleCallEnd called');
     setIsCallActive(false);
-    setHasPendingDesktopCall(false);
+    setIsDesktopCallActiveFromAnalyzer(false); // CRITICAL: Reset desktop call state
     setElapsedTime(0);
     // Trigger refresh of call history
     setRefreshTrigger(prev => prev + 1);
@@ -136,7 +129,7 @@ export default function CallsPage() {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
                 </span>
-                {hasPendingDesktopCall ? 'Desktop Call' : 'Live Call'} - {formatTime(elapsedTime)}
+                {isDesktopCallActiveFromAnalyzer ? 'Desktop Call' : 'Live Call'} - {formatTime(elapsedTime)}
               </div>
             </Badge>
           )}
@@ -149,7 +142,7 @@ export default function CallsPage() {
             <div className="flex items-center gap-2">
               <Headphones className="h-5 w-5 text-primary" />
               <h2 className="font-semibold">Call Session</h2>
-              {hasPendingDesktopCall && (
+              {isDesktopCallActiveFromAnalyzer && (
                 <Badge variant="secondary" className="text-xs">
                   Desktop Triggered
                 </Badge>
@@ -174,7 +167,7 @@ export default function CallsPage() {
                 variant={actualCallActive ? "destructive" : "default"}
                 onClick={handleCallToggle}
                 className="gap-2"
-                disabled={hasPendingDesktopCall} // Disable if desktop is controlling the call
+                disabled={isDesktopCallActiveFromAnalyzer} // Disable if desktop is controlling the call
               >
                 <Phone className="h-4 w-4" />
                 {actualCallActive ? "End Call" : "Start Call"}
@@ -186,10 +179,10 @@ export default function CallsPage() {
             {actualCallActive ? (
               <div>
                 <div className="mb-4 text-sm text-muted-foreground">
-                  {hasPendingDesktopCall ? (
+                  {isDesktopCallActiveFromAnalyzer ? (
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                      CallAnalyzer is now active and processing desktop call request
+                      CallAnalyzer is actively managing desktop call
                     </div>
                   ) : (
                     'CallAnalyzer is active for manual call'
@@ -197,6 +190,7 @@ export default function CallsPage() {
                 </div>
                 <CallAnalyzer 
                   onCallEnd={handleCallEnd}
+                  onDesktopCallStateChange={handleDesktopCallStateChange}
                 />
               </div>
             ) : (
@@ -215,7 +209,6 @@ export default function CallsPage() {
                   <Button 
                     onClick={handleCallToggle} 
                     className="gap-2"
-                    disabled={!desktopConnected && hasPendingDesktopCall}
                   >
                     <Phone className="h-4 w-4" />
                     Start Call

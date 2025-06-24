@@ -47,9 +47,10 @@ const SPEAKER_COLORS = [
 
 interface CallAnalyzerProps {
   onCallEnd?: () => void;
+  onDesktopCallStateChange?: (isActive: boolean) => void;
 }
 
-export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
+export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange }: CallAnalyzerProps) {
   const [live, setLive] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -59,7 +60,6 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
   const [callStartTime, setCallStartTime] = useState<number>(0);
   const [desktopTriggered, setDesktopTriggered] = useState(false);
   const [desktopConnected, setDesktopConnected] = useState(false);
-  const [processingDesktopMessage, setProcessingDesktopMessage] = useState(false);
   const [authenticationLoading, setAuthenticationLoading] = useState(true);
   const [pendingDesktopCallMessageId, setPendingDesktopCallMessageId] = useState<string | null>(null);
   
@@ -187,7 +187,11 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
         if (!live && !connecting) {
           console.log('🎯 ENHANCED LOGGING: Conditions met, setting desktop triggered and starting live analysis');
           setDesktopTriggered(true);
-          setProcessingDesktopMessage(true);
+          
+          // CRITICAL: Signal to parent that desktop call is now active
+          if (onDesktopCallStateChange) {
+            onDesktopCallStateChange(true);
+          }
           
           // CRITICAL FIX: Acknowledge the message immediately to prevent it from being processed again
           try {
@@ -209,7 +213,6 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
             console.log('⏳ ENHANCED LOGGING: Authentication still loading, queueing desktop call request');
             // Store the message ID to process once authentication is complete
             setPendingDesktopCallMessageId(message.id);
-            setProcessingDesktopMessage(false);
           } else if (!user) {
             console.log('❌ ENHANCED LOGGING: No authenticated user, cannot start call');
             toast({
@@ -217,7 +220,10 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
               title: 'Authentication required',
               description: 'Please log in to start a call session.'
             });
-            setProcessingDesktopMessage(false);
+            // Signal to parent that desktop call is no longer active
+            if (onDesktopCallStateChange) {
+              onDesktopCallStateChange(false);
+            }
             setDesktopTriggered(false);
           } else {
             // Authentication is complete and user is logged in, start the call immediately
@@ -225,7 +231,6 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
             console.log('🎯 ENHANCED LOGGING: About to call startLive(true)');
             await startLive(true);
             console.log('🎯 ENHANCED LOGGING: startLive(true) completed');
-            setProcessingDesktopMessage(false);
           }
         } else {
           console.log('⚠️ ENHANCED LOGGING: Call already active or connecting, ignoring desktop trigger');
@@ -868,6 +873,11 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
     setDesktopTriggered(false);
     setPendingDesktopCallMessageId(null);
     
+    // CRITICAL: Signal to parent that desktop call is no longer active
+    if (onDesktopCallStateChange) {
+      onDesktopCallStateChange(false);
+    }
+    
     // Show feedback modal if we have a call session
     if (currentCallId) {
       setShowFeedbackModal(true);
@@ -1139,7 +1149,7 @@ export function CallAnalyzer({ onCallEnd }: CallAnalyzerProps) {
           <Button
             onClick={live ? stopLive : () => startLive()}
             variant={live ? 'destructive' : 'default'}
-            disabled={connecting || desktopTriggered || processingDesktopMessage}
+            disabled={connecting || desktopTriggered}
           >
             {connecting ? (
               'Connecting...'
