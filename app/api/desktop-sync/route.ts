@@ -282,11 +282,16 @@ export async function POST(request: NextRequest) {
         return Response.json({ error: 'Unknown message type' }, { status: 400 });
     }
   } catch (error) {
-    console.error('❌ ENHANCED LOGGING: Error handling POST request:', error);
+  console.error('❌ ENHANCED LOGGING: Error handling POST request:', error);
+
+  if (error instanceof Error) {
     console.error('❌ ENHANCED LOGGING: Error name:', error.name);
     console.error('❌ ENHANCED LOGGING: Error message:', error.message);
     console.error('❌ ENHANCED LOGGING: Error stack:', error.stack);
-    
-    return Response.json({ error: 'Internal server error' }, { status: 500 });
+  } else {
+    console.error('❌ ENHANCED LOGGING: Unknown error type:', JSON.stringify(error));
   }
+
+  return Response.json({ error: 'Internal server error' }, { status: 500 });
+}
 }
