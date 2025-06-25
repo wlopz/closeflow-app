@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { CallAnalyzer } from './components/call-analyzer';
 import { CallHistoryDetailed } from '@/components/dashboard/call-history-detailed';
+import { supabase } from '@/lib/supabase/client';
 
 export default function CallsPage() {
   const [isCallActive, setIsCallActive] = useState(false);
@@ -58,7 +59,7 @@ export default function CallsPage() {
         setDesktopConnected(data.connected);
         
         // CRITICAL: Proactively check for desktop call initiation messages
-        if (data.connected && data.pendingWebAppMessages > 0) {
+        if (data.pendingWebAppMessages > 0) {
           console.log('📨 ENHANCED LOGGING: Found pending messages for web app, fetching...');
           
           const messagesResponse = await fetch('/api/desktop-sync?action=get-messages-for-webapp');
