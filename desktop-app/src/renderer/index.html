@@ -82,6 +82,30 @@
                 </div>
             </section>
 
+            <!-- Audio Debug Section -->
+            <section class="section">
+                <h2>Audio Debug</h2>
+                <div class="debug-controls">
+                    <button id="toggleAudioPlayback" class="btn btn-outline">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="11,5 6,9 2,9 2,15 6,15 11,19"/>
+                            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                        </svg>
+                        Enable Audio Playback
+                    </button>
+                    <div class="debug-info">
+                        <span id="audioDebugStatus">Audio playback disabled</span>
+                    </div>
+                </div>
+                
+                <!-- Hidden audio element for playback -->
+                <audio id="debugAudioPlayer" controls style="display: none;" autoplay></audio>
+                
+                <div class="debug-warning">
+                    <p><strong>Debug Mode:</strong> This feature plays back captured audio for testing. Disable when not debugging to avoid feedback loops.</p>
+                </div>
+            </section>
+
             <!-- Call Analysis Controls -->
             <section class="section">
                 <h2>Call Analysis</h2>

@@ -210,6 +210,33 @@ body {
     text-align: right;
 }
 
+/* Debug Controls */
+.debug-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.debug-info {
+    font-size: 12px;
+    color: #666;
+}
+
+.debug-warning {
+    padding: 12px;
+    background: rgba(251, 191, 36, 0.1);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    border-radius: 6px;
+    margin-top: 12px;
+}
+
+.debug-warning p {
+    font-size: 12px;
+    color: #92400e;
+    margin: 0;
+}
+
 /* Buttons */
 .btn {
     display: inline-flex;

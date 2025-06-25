@@ -12,6 +12,12 @@ class DesktopRenderer {
         this.isStartingCall = false;
         this.isStoppingCall = false;
         
+        // Audio debug properties
+        this.audioPlaybackEnabled = false;
+        this.audioChunks = [];
+        this.mediaRecorder = null;
+        this.audioPlayer = null;
+        
         this.initializeElements();
         this.setupEventListeners();
         this.loadInitialData();
@@ -43,6 +49,11 @@ class DesktopRenderer {
         // Action elements
         this.openWebAppBtn = document.getElementById('openWebAppBtn');
         this.settingsBtn = document.getElementById('settingsBtn');
+        
+        // Debug elements
+        this.toggleAudioPlaybackBtn = document.getElementById('toggleAudioPlayback');
+        this.audioDebugStatus = document.getElementById('audioDebugStatus');
+        this.debugAudioPlayer = document.getElementById('debugAudioPlayer');
         
         // Notifications container
         this.notifications = document.getElementById('notifications');
@@ -83,6 +94,11 @@ class DesktopRenderer {
             this.showSettings();
         });
 
+        // Debug audio playback toggle
+        this.toggleAudioPlaybackBtn.addEventListener('click', () => {
+            this.toggleAudioPlayback();
+        });
+
         // Device selection listeners
         this.inputDevice.addEventListener('change', (e) => {
             if (e.target.value) {
@@ -101,6 +117,34 @@ class DesktopRenderer {
                 this.selectSystemAudioSource(e.target.value);
             }
         });
+    }
+
+    toggleAudioPlayback() {
+        this.audioPlaybackEnabled = !this.audioPlaybackEnabled;
+        
+        if (this.audioPlaybackEnabled) {
+            this.toggleAudioPlaybackBtn.innerHTML = `
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M11 5L6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6"/>
+                </svg>
+                Disable Audio Playback
+            `;
+            this.audioDebugStatus.textContent = 'Audio playback enabled - you should hear captured audio';
+            this.debugAudioPlayer.style.display = 'block';
+            this.showNotification('Audio Debug', 'Audio playback enabled. You should now hear the captured system audio.', 'info');
+        } else {
+            this.toggleAudioPlaybackBtn.innerHTML = `
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="11,5 6,9 2,9 2,15 6,15 11,19"/>
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                </svg>
+                Enable Audio Playback
+            `;
+            this.audioDebugStatus.textContent = 'Audio playback disabled';
+            this.debugAudioPlayer.style.display = 'none';
+            this.debugAudioPlayer.src = '';
+            this.showNotification('Audio Debug', 'Audio playback disabled.', 'info');
+        }
     }
 
     async loadInitialData() {
@@ -436,6 +480,11 @@ class DesktopRenderer {
             // Note: We don't set isCallActive here - we wait for the main process to confirm
             // via the zoom-status-changed event when it receives web app confirmation
             
+            // Set up audio debug if enabled
+            if (this.audioPlaybackEnabled) {
+                this.setupAudioDebug();
+            }
+            
         } catch (error) {
             console.error('Error starting call analysis:', error);
             this.showNotification('Error', error.message || 'Failed to start call analysis', 'error');
@@ -462,12 +511,84 @@ class DesktopRenderer {
             // Note: We don't set isCallActive here - we wait for the main process to confirm
             // via the zoom-status-changed event when it receives web app confirmation
             
+            // Clean up audio debug
+            this.cleanupAudioDebug();
+            
         } catch (error) {
             console.error('Error stopping call analysis:', error);
             this.showNotification('Error', error.message || 'Failed to stop call analysis', 'error');
             this.isStoppingCall = false;
             this.updateButtonStates();
             this.updateAnalysisStatus();
+        }
+    }
+
+    setupAudioDebug() {
+        console.log('🎧 Setting up audio debug playback');
+        
+        // Reset audio chunks array
+        this.audioChunks = [];
+        
+        // Set up WebSocket for audio data
+        if (window.closeFlowWebSocket) {
+            // Add event listener for audio data
+            const originalSend = window.closeFlowWebSocket.send;
+            window.closeFlowWebSocket.send = (data) => {
+                // Call the original send method
+                originalSend.call(window.closeFlowWebSocket, data);
+                
+                // If it's binary data (audio) and playback is enabled, process it
+                if (data instanceof Blob && this.audioPlaybackEnabled) {
+                    this.processAudioChunk(data);
+                }
+            };
+            
+            console.log('🎧 Audio debug setup complete - WebSocket send method overridden');
+        } else {
+            console.log('⚠️ Cannot set up audio debug - WebSocket not found');
+        }
+    }
+    
+    processAudioChunk(chunk) {
+        // Add the chunk to our array
+        this.audioChunks.push(chunk);
+        
+        // Keep only the last 10 chunks to avoid memory issues
+        if (this.audioChunks.length > 10) {
+            this.audioChunks.shift();
+        }
+        
+        // Create a new blob from all chunks
+        const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm;codecs=opus' });
+        
+        // Create a URL for the blob
+        const audioUrl = URL.createObjectURL(audioBlob);
+        
+        // Set the audio player source and play
+        this.debugAudioPlayer.src = audioUrl;
+        
+        // Clean up old URLs to avoid memory leaks
+        setTimeout(() => {
+            URL.revokeObjectURL(audioUrl);
+        }, 5000);
+    }
+    
+    cleanupAudioDebug() {
+        console.log('🧹 Cleaning up audio debug');
+        
+        // Reset audio chunks
+        this.audioChunks = [];
+        
+        // Reset audio player
+        if (this.debugAudioPlayer) {
+            this.debugAudioPlayer.pause();
+            this.debugAudioPlayer.src = '';
+        }
+        
+        // Reset WebSocket send method if it was overridden
+        if (window.closeFlowWebSocket && window.closeFlowWebSocket._originalSend) {
+            window.closeFlowWebSocket.send = window.closeFlowWebSocket._originalSend;
+            delete window.closeFlowWebSocket._originalSend;
         }
     }
 
