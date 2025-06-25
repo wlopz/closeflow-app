@@ -343,6 +343,10 @@ class AudioWebSocketServer {
     dgUrl.searchParams.set('punctuate', 'true');
     dgUrl.searchParams.set('smart_format', 'true');
     
+    // CRITICAL FIX: Add explicit encoding and sample rate parameters
+    dgUrl.searchParams.set('encoding', 'opus');
+    dgUrl.searchParams.set('sample_rate', '48000');
+    
     // SIMPLIFIED: Remove problematic parameters that might be causing connection issues
     // dgUrl.searchParams.set('diarize', 'true');
     // dgUrl.searchParams.set('utterances', 'true');

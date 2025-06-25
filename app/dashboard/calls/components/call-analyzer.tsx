@@ -652,7 +652,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
         const stream = await navigator.mediaDevices.getUserMedia({ 
           audio: { 
             channelCount: 1, 
-            sampleRate: 16000,
+            sampleRate: 48000, // CRITICAL FIX: Changed from 16000 to 48000 Hz for Opus compatibility
             echoCancellation: true,
             noiseSuppression: true
           } 
