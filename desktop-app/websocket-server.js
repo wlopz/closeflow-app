@@ -131,6 +131,11 @@ class AudioWebSocketServer {
           case 'start-audio-capture':
             this.isRecording = true;
             console.log('🎤 ENHANCED LOGGING: Desktop main process notified audio capture started');
+            
+            // CRITICAL FIX: Proactively set transcription active and start Deepgram connection
+            // This ensures Deepgram is ready to receive audio as soon as it starts flowing
+            this.transcriptionActive = true;
+            this.startDeepgramConnection();
             break;
           case 'stop-audio-capture':
             this.isRecording = false;
