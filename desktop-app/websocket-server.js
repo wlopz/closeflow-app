@@ -342,12 +342,14 @@ class AudioWebSocketServer {
     dgUrl.searchParams.set('interim_results', 'true');
     dgUrl.searchParams.set('punctuate', 'true');
     dgUrl.searchParams.set('smart_format', 'true');
-    dgUrl.searchParams.set('diarize', 'true');
-    dgUrl.searchParams.set('utterances', 'true');
-    dgUrl.searchParams.set('endpointing', '10000');
+    
+    // SIMPLIFIED: Remove problematic parameters that might be causing connection issues
+    // dgUrl.searchParams.set('diarize', 'true');
+    // dgUrl.searchParams.set('utterances', 'true');
+    // dgUrl.searchParams.set('endpointing', '10000');
 
-    console.log('🔗 ENHANCED LOGGING: Deepgram URL:', dgUrl.toString());
-    console.log('🔗 ENHANCED LOGGING: Endpointing set to 10 seconds for better stability');
+    console.log('🔗 ENHANCED LOGGING: Simplified Deepgram URL:', dgUrl.toString());
+    console.log('🔗 ENHANCED LOGGING: Removed diarize, utterances, and endpointing parameters for better stability');
 
     this.deepgramConnection = new WebSocket(dgUrl.toString(), ['token', this.deepgramApiKey]);
 
@@ -401,14 +403,22 @@ class AudioWebSocketServer {
             console.log('📝 ENHANCED LOGGING: Confidence:', alternative.confidence);
             console.log('📝 ENHANCED LOGGING: Is final:', message.is_final);
             console.log('📝 ENHANCED LOGGING: Words count:', alternative.words?.length || 0);
+            
+            // ENHANCED: Log the entire deepgram result for debugging
+            console.log('📝 ENHANCED LOGGING: Complete Deepgram result object:', JSON.stringify(message, null, 2));
+          } else {
+            console.log('📝 ENHANCED LOGGING: No alternatives found in Deepgram result');
+            console.log('📝 ENHANCED LOGGING: Complete message structure:', JSON.stringify(message, null, 2));
           }
         } else if (message.type === 'Metadata') {
           console.log('📊 ENHANCED LOGGING: Deepgram Metadata message received');
+          console.log('📊 ENHANCED LOGGING: Metadata content:', JSON.stringify(message, null, 2));
         } else if (message.type === 'UtteranceEnd') {
           console.log('🔚 ENHANCED LOGGING: Deepgram UtteranceEnd message received');
           console.log('🔚 ENHANCED LOGGING: Last word end:', message.last_word_end);
         } else {
           console.log('❓ ENHANCED LOGGING: Unknown Deepgram message type:', message.type);
+          console.log('❓ ENHANCED LOGGING: Complete unknown message:', JSON.stringify(message, null, 2));
         }
         
         // Forward Deepgram results to web app
@@ -474,6 +484,9 @@ class AudioWebSocketServer {
         case 1003:
           console.log('⚠️ ENHANCED LOGGING: Unsupported data');
           break;
+        case 1005:
+          console.log('⚠️ ENHANCED LOGGING: No status received (connection closed without close frame)');
+          break;
         case 1006:
           console.log('⚠️ ENHANCED LOGGING: Abnormal closure (no close frame)');
           break;
@@ -481,7 +494,7 @@ class AudioWebSocketServer {
           console.log('⚠️ ENHANCED LOGGING: Policy violation (possibly invalid audio format)');
           break;
         case 1011:
-          console.log('⚠️ ENHANCED LOGGING: Internal server error');
+          console.log('⚠️ ENHANCED LOGGING: Internal server error (Deepgram timeout or processing issue)');
           break;
         default:
           console.log('❓ ENHANCED LOGGING: Unknown close code:', code);
