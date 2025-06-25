@@ -352,6 +352,12 @@ class AudioWebSocketServer {
     this.deepgramConnection = new WebSocket(dgUrl.toString(), ['token', this.deepgramApiKey]);
 
     this.deepgramConnection.on('open', () => {
+      // CRITICAL FIX: Add null check to prevent TypeError
+      if (!this.deepgramConnection) {
+        console.log('⚠️ ENHANCED LOGGING: Deepgram connection became null during open callback');
+        return;
+      }
+
       console.log('✅ ENHANCED LOGGING: Connected to Deepgram successfully');
       console.log('✅ ENHANCED LOGGING: Deepgram connection ready state:', this.deepgramConnection.readyState);
       
