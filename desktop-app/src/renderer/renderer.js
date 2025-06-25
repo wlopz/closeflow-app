@@ -1,3 +1,5 @@
+'use client';
+
 const { ipcRenderer, shell } = require('electron');
 
 class DesktopRenderer {
@@ -142,7 +144,11 @@ class DesktopRenderer {
             `;
             this.audioDebugStatus.textContent = 'Audio playback disabled';
             this.debugAudioPlayer.style.display = 'none';
+            
+            // CRITICAL FIX: Properly stop and clear audio playback
+            this.debugAudioPlayer.pause();
             this.debugAudioPlayer.src = '';
+            
             this.showNotification('Audio Debug', 'Audio playback disabled.', 'info');
         }
     }
@@ -564,8 +570,13 @@ class DesktopRenderer {
         // Create a URL for the blob
         const audioUrl = URL.createObjectURL(audioBlob);
         
-        // Set the audio player source and play
+        // Set the audio player source
         this.debugAudioPlayer.src = audioUrl;
+        
+        // CRITICAL FIX: Explicitly call play() to ensure audio playback starts
+        this.debugAudioPlayer.play().catch(error => {
+            console.log('🎧 Audio play failed (this is normal for some chunks):', error.message);
+        });
         
         // Clean up old URLs to avoid memory leaks
         setTimeout(() => {
