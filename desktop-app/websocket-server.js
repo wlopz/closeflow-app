@@ -103,15 +103,26 @@ class AudioWebSocketServer {
         switch (message.type) {
           case 'start-transcription':
             console.log('🔗 ENHANCED LOGGING: Web app requested transcription start');
+            
+            // CRITICAL FIX: Store the API key and THEN start Deepgram connection
             this.deepgramApiKey = message.deepgramApiKey;
-            this.transcriptionActive = true; // CRITICAL: Set transcription as active
-            this.startDeepgramConnection();
+            this.transcriptionActive = true; // Set transcription as active
+            
+            // Only start Deepgram connection if we have an API key
+            if (this.deepgramApiKey) {
+              console.log('🔑 ENHANCED LOGGING: Deepgram API key received, starting connection');
+              this.startDeepgramConnection();
+            } else {
+              console.error('❌ ENHANCED LOGGING: No Deepgram API key provided in start-transcription message');
+            }
             break;
+            
           case 'stop-transcription':
             console.log('🛑 ENHANCED LOGGING: Web app requested transcription stop');
             this.transcriptionActive = false; // CRITICAL: Set transcription as inactive
             this.stopDeepgramConnection();
             break;
+            
           default:
             console.log('❓ ENHANCED LOGGING: Unknown message type from web app:', message.type);
         }
@@ -132,11 +143,12 @@ class AudioWebSocketServer {
             this.isRecording = true;
             console.log('🎤 ENHANCED LOGGING: Desktop main process notified audio capture started');
             
-            // CRITICAL FIX: Proactively set transcription active and start Deepgram connection
-            // This ensures Deepgram is ready to receive audio as soon as it starts flowing
+            // CRITICAL FIX: Only set transcription active flag, but DON'T start Deepgram connection yet
+            // Wait for the web app to provide the API key
             this.transcriptionActive = true;
-            this.startDeepgramConnection();
+            console.log('🔄 ENHANCED LOGGING: Transcription active flag set to true, waiting for API key from web app');
             break;
+            
           case 'stop-audio-capture':
             this.isRecording = false;
             console.log('🛑 ENHANCED LOGGING: Desktop main process notified audio capture stopped');
@@ -298,6 +310,12 @@ class AudioWebSocketServer {
       return;
     }
     
+    // CRITICAL FIX: Don't attempt to reconnect if we don't have an API key
+    if (!this.deepgramApiKey) {
+      console.log('⚠️ ENHANCED LOGGING: Cannot reconnect to Deepgram - no API key available');
+      return;
+    }
+    
     // Don't exceed max reconnect attempts
     if (this.deepgramReconnectAttempts >= this.maxDeepgramReconnects) {
       console.log('⚠️ ENHANCED LOGGING: Maximum Deepgram reconnection attempts reached');
@@ -314,7 +332,7 @@ class AudioWebSocketServer {
       console.log(`🔄 ENHANCED LOGGING: Executing Deepgram reconnection attempt ${this.deepgramReconnectAttempts}`);
       this.deepgramReconnectTimer = null;
       
-      if (this.transcriptionActive) {
+      if (this.transcriptionActive && this.deepgramApiKey) {
         this.startDeepgramConnection();
       }
     }, delay);
@@ -358,6 +376,7 @@ class AudioWebSocketServer {
   }
 
   startDeepgramConnection() {
+    // CRITICAL FIX: Check for API key before attempting connection
     if (!this.deepgramApiKey) {
       console.error('❌ ENHANCED LOGGING: No Deepgram API key provided');
       return;
