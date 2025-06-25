@@ -38,6 +38,11 @@ class CloseFlowDesktop {
     
     // Add flag to track if renderer is ready
     this.rendererReady = false;
+    
+    // Add retry mechanism for connection
+    this.connectionRetryCount = 0;
+    this.maxConnectionRetries = 5;
+    this.connectionRetryDelay = 2000; // Start with 2 seconds
   }
 
   // NEW: Get web app URL based on environment
@@ -815,9 +820,30 @@ class CloseFlowDesktop {
           this.isConnected = false;
           this.updateConnectionStatus('disconnected');
           this.updateTrayMenu();
+          
+          // Retry connection with exponential backoff
+          this.retryConnection();
         }
       }
     }, 5000); // Ping every 5 seconds
+  }
+  
+  // NEW: Add retry mechanism with exponential backoff
+  async retryConnection() {
+    if (this.connectionRetryCount >= this.maxConnectionRetries) {
+      console.log('⚠️ Maximum connection retry attempts reached');
+      this.connectionRetryCount = 0; // Reset for next time
+      return;
+    }
+    
+    this.connectionRetryCount++;
+    const delay = this.connectionRetryDelay * Math.pow(1.5, this.connectionRetryCount - 1);
+    console.log(`🔄 Retrying connection in ${delay}ms (attempt ${this.connectionRetryCount}/${this.maxConnectionRetries})`);
+    
+    setTimeout(async () => {
+      console.log(`🔄 Executing connection retry attempt ${this.connectionRetryCount}`);
+      await this.checkWebAppConnection();
+    }, delay);
   }
 
   startMessagePolling() {
@@ -949,6 +975,13 @@ class CloseFlowDesktop {
         const wasConnected = this.isConnected;
         this.isConnected = true;
         
+        // Reset retry count on successful connection
+        if (this.connectionRetryCount > 0) {
+          console.log('✅ Connection restored after retries');
+          this.connectionRetryCount = 0;
+          this.connectionRetryDelay = 2000; // Reset to initial delay
+        }
+        
         if (!wasConnected) {
           console.log('✅ Connected to CloseFlow web app at:', this.webAppUrl);
           this.updateConnectionStatus('connected');
@@ -966,6 +999,9 @@ class CloseFlowDesktop {
         console.log('❌ Web app URL was:', this.webAppUrl);
         this.updateConnectionStatus('disconnected');
         this.updateTrayMenu();
+        
+        // Start retry process
+        this.retryConnection();
       }
     }
   }

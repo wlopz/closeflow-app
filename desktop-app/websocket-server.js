@@ -22,6 +22,12 @@ class AudioWebSocketServer {
     
     // CRITICAL: Add flag to track if transcription should be active
     this.transcriptionActive = false;
+    
+    // Add reconnection mechanism
+    this.deepgramReconnectAttempts = 0;
+    this.maxDeepgramReconnects = 5;
+    this.deepgramReconnectDelay = 2000; // Start with 2 seconds
+    this.deepgramReconnectTimer = null;
   }
 
   start() {
@@ -166,42 +172,62 @@ class AudioWebSocketServer {
     if (this.deepgramReady && this.deepgramConnection && this.deepgramConnection.readyState === WebSocket.OPEN) {
       // Deepgram is ready, send immediately
       console.log('🎤 ENHANCED LOGGING: Deepgram ready - forwarding audio data immediately');
-      this.deepgramConnection.send(audioData);
-      console.log('🎤 ENHANCED LOGGING: Audio data sent to Deepgram successfully');
+      try {
+        this.deepgramConnection.send(audioData);
+        console.log('🎤 ENHANCED LOGGING: Audio data sent to Deepgram successfully');
+      } catch (error) {
+        console.error('❌ ENHANCED LOGGING: Error sending audio to Deepgram:', error);
+        // If we encounter an error sending to Deepgram, mark as not ready and buffer
+        this.deepgramReady = false;
+        this.bufferAudioData(audioData);
+        
+        // Try to reconnect to Deepgram
+        this.scheduleDeepgramReconnect();
+      }
     } else {
       // Deepgram not ready, buffer the audio data
-      console.log('📦 ENHANCED LOGGING: Deepgram not ready - buffering audio data');
-      console.log('📦 ENHANCED LOGGING: Current buffer size:', this.audioBuffer.length);
-      console.log('📦 ENHANCED LOGGING: Max buffer size:', this.maxBufferSize);
-      
-      // Initialize buffer start time if this is the first chunk
-      if (this.audioBuffer.length === 0) {
-        this.bufferStartTime = Date.now();
-        console.log('📦 ENHANCED LOGGING: Started audio buffering at:', new Date(this.bufferStartTime).toISOString());
-      }
-      
-      // Check buffer size limit
-      if (this.audioBuffer.length >= this.maxBufferSize) {
-        console.log('⚠️ ENHANCED LOGGING: Audio buffer full, removing oldest chunk');
-        this.audioBuffer.shift(); // Remove oldest chunk
-      }
-      
-      // Check buffer timeout
-      const bufferAge = Date.now() - (this.bufferStartTime || Date.now());
-      if (bufferAge > this.bufferTimeoutMs) {
-        console.log('⚠️ ENHANCED LOGGING: Audio buffer timeout reached, clearing old data');
-        this.clearAudioBuffer();
-        this.bufferStartTime = Date.now();
-      }
-      
-      // Add new audio data to buffer
-      this.audioBuffer.push({
-        data: audioData,
-        timestamp: Date.now()
-      });
-      
-      console.log('📦 ENHANCED LOGGING: Audio data buffered, new buffer size:', this.audioBuffer.length);
-      console.log('📦 ENHANCED LOGGING: Buffer age:', bufferAge, 'ms');
+      this.bufferAudioData(audioData);
+    }
+  }
+  
+  // Separate method for buffering audio data
+  bufferAudioData(audioData) {
+    console.log('📦 ENHANCED LOGGING: Deepgram not ready - buffering audio data');
+    console.log('📦 ENHANCED LOGGING: Current buffer size:', this.audioBuffer.length);
+    console.log('📦 ENHANCED LOGGING: Max buffer size:', this.maxBufferSize);
+    
+    // Initialize buffer start time if this is the first chunk
+    if (this.audioBuffer.length === 0) {
+      this.bufferStartTime = Date.now();
+      console.log('📦 ENHANCED LOGGING: Started audio buffering at:', new Date(this.bufferStartTime).toISOString());
+    }
+    
+    // Check buffer size limit
+    if (this.audioBuffer.length >= this.maxBufferSize) {
+      console.log('⚠️ ENHANCED LOGGING: Audio buffer full, removing oldest chunk');
+      this.audioBuffer.shift(); // Remove oldest chunk
+    }
+    
+    // Check buffer timeout
+    const bufferAge = Date.now() - (this.bufferStartTime || Date.now());
+    if (bufferAge > this.bufferTimeoutMs) {
+      console.log('⚠️ ENHANCED LOGGING: Audio buffer timeout reached, clearing old data');
+      this.clearAudioBuffer();
+      this.bufferStartTime = Date.now();
+    }
+    
+    // Add new audio data to buffer
+    this.audioBuffer.push({
+      data: audioData,
+      timestamp: Date.now()
+    });
+    
+    console.log('📦 ENHANCED LOGGING: Audio data buffered, new buffer size:', this.audioBuffer.length);
+    console.log('📦 ENHANCED LOGGING: Buffer age:', bufferAge, 'ms');
+    
+    // If transcription is active but Deepgram is not connected, try to reconnect
+    if (this.transcriptionActive && (!this.deepgramConnection || this.deepgramConnection.readyState !== WebSocket.OPEN)) {
+      this.scheduleDeepgramReconnect();
     }
   }
 
@@ -255,6 +281,35 @@ class AudioWebSocketServer {
     // Clear the buffer after sending
     this.clearAudioBuffer();
   }
+  
+  // NEW: Schedule Deepgram reconnection with exponential backoff
+  scheduleDeepgramReconnect() {
+    // Don't schedule if we're already reconnecting or if transcription is not active
+    if (this.deepgramReconnectTimer || !this.transcriptionActive) {
+      return;
+    }
+    
+    // Don't exceed max reconnect attempts
+    if (this.deepgramReconnectAttempts >= this.maxDeepgramReconnects) {
+      console.log('⚠️ ENHANCED LOGGING: Maximum Deepgram reconnection attempts reached');
+      this.deepgramReconnectAttempts = 0; // Reset for next time
+      return;
+    }
+    
+    this.deepgramReconnectAttempts++;
+    const delay = this.deepgramReconnectDelay * Math.pow(1.5, this.deepgramReconnectAttempts - 1);
+    
+    console.log(`🔄 ENHANCED LOGGING: Scheduling Deepgram reconnection in ${delay}ms (attempt ${this.deepgramReconnectAttempts}/${this.maxDeepgramReconnects})`);
+    
+    this.deepgramReconnectTimer = setTimeout(() => {
+      console.log(`🔄 ENHANCED LOGGING: Executing Deepgram reconnection attempt ${this.deepgramReconnectAttempts}`);
+      this.deepgramReconnectTimer = null;
+      
+      if (this.transcriptionActive) {
+        this.startDeepgramConnection();
+      }
+    }, delay);
+  }
 
   startDeepgramConnection() {
     if (!this.deepgramApiKey) {
@@ -266,6 +321,16 @@ class AudioWebSocketServer {
     if (!this.transcriptionActive) {
       console.log('⚠️ ENHANCED LOGGING: Transcription not active, not starting Deepgram connection');
       return;
+    }
+    
+    // Clear any existing connection
+    if (this.deepgramConnection) {
+      try {
+        this.deepgramConnection.close();
+      } catch (e) {
+        // Ignore errors during cleanup
+      }
+      this.deepgramConnection = null;
     }
 
     console.log('🔗 ENHANCED LOGGING: Connecting to Deepgram...');
@@ -294,11 +359,14 @@ class AudioWebSocketServer {
       this.deepgramReady = true;
       console.log('✅ ENHANCED LOGGING: Deepgram ready flag set to true');
       
+      // Reset reconnection attempts on successful connection
+      this.deepgramReconnectAttempts = 0;
+      
       // Send any buffered audio data
       this.sendBufferedAudio();
       
       // Notify web app that Deepgram is ready
-      if (this.webAppConnection) {
+      if (this.webAppConnection && this.webAppConnection.readyState === WebSocket.OPEN) {
         this.webAppConnection.send(JSON.stringify({
           type: 'deepgram-connected'
         }));
@@ -363,11 +431,13 @@ class AudioWebSocketServer {
       this.deepgramReady = false;
       console.log('❌ ENHANCED LOGGING: Deepgram ready flag set to false due to error');
       
-      // Clear buffer on error as the connection is no longer valid
-      this.clearAudioBuffer();
+      // Schedule reconnection attempt if transcription is still active
+      if (this.transcriptionActive) {
+        this.scheduleDeepgramReconnect();
+      }
       
       // Notify web app of error
-      if (this.webAppConnection) {
+      if (this.webAppConnection && this.webAppConnection.readyState === WebSocket.OPEN) {
         this.webAppConnection.send(JSON.stringify({
           type: 'deepgram-error',
           error: error.message
@@ -383,9 +453,6 @@ class AudioWebSocketServer {
       // CRITICAL: Reset Deepgram ready flag on close
       this.deepgramReady = false;
       console.log('🔗 ENHANCED LOGGING: Deepgram ready flag set to false due to connection close');
-      
-      // Clear buffer on close as the connection is no longer valid
-      this.clearAudioBuffer();
       
       // Log common close codes for debugging
       switch (code) {
@@ -416,8 +483,13 @@ class AudioWebSocketServer {
       
       this.deepgramConnection = null;
       
+      // Schedule reconnection attempt if transcription is still active
+      if (this.transcriptionActive) {
+        this.scheduleDeepgramReconnect();
+      }
+      
       // Notify web app
-      if (this.webAppConnection) {
+      if (this.webAppConnection && this.webAppConnection.readyState === WebSocket.OPEN) {
         this.webAppConnection.send(JSON.stringify({
           type: 'deepgram-disconnected',
           closeCode: code,
@@ -428,6 +500,12 @@ class AudioWebSocketServer {
   }
 
   stopDeepgramConnection() {
+    // Clear any reconnection timer
+    if (this.deepgramReconnectTimer) {
+      clearTimeout(this.deepgramReconnectTimer);
+      this.deepgramReconnectTimer = null;
+    }
+    
     if (this.deepgramConnection) {
       console.log('🛑 ENHANCED LOGGING: Closing Deepgram connection');
       console.log('🛑 ENHANCED LOGGING: Current connection state:', this.deepgramConnection.readyState);
@@ -469,6 +547,12 @@ class AudioWebSocketServer {
     this.stopDeepgramConnection();
     this.clearAudioBuffer();
     this.isRecording = false;
+    
+    // Clear any reconnection timer
+    if (this.deepgramReconnectTimer) {
+      clearTimeout(this.deepgramReconnectTimer);
+      this.deepgramReconnectTimer = null;
+    }
   }
 
   stop() {
