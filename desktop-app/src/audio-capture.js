@@ -111,11 +111,16 @@ class SystemAudioCapture {
 
             console.log('🎤 ENHANCED LOGGING: About to call getUserMedia with source:', '${this.selectedSourceId}');
             
-            // FIXED: Use the supported getUserMedia API format
+            // CRITICAL FIX: Explicitly set sampleRate to 48000 Hz for Opus compatibility
             const constraints = {
               audio: {
                 chromeMediaSource: 'desktop',
-                chromeMediaSourceId: '${this.selectedSourceId}'
+                chromeMediaSourceId: '${this.selectedSourceId}',
+                sampleRate: 48000,
+                channelCount: 1,
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false
               },
               video: false
             };

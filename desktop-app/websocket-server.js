@@ -28,6 +28,10 @@ class AudioWebSocketServer {
     this.maxDeepgramReconnects = 5;
     this.deepgramReconnectDelay = 2000; // Start with 2 seconds
     this.deepgramReconnectTimer = null;
+    
+    // CRITICAL FIX: Add heartbeat mechanism to keep Deepgram connection alive
+    this.deepgramHeartbeatInterval = null;
+    this.deepgramHeartbeatIntervalMs = 15000; // 15 seconds
   }
 
   start() {
@@ -311,6 +315,43 @@ class AudioWebSocketServer {
     }, delay);
   }
 
+  // CRITICAL FIX: Add heartbeat method to keep Deepgram connection alive
+  startDeepgramHeartbeat() {
+    // Clear any existing heartbeat
+    this.stopDeepgramHeartbeat();
+    
+    console.log('💓 ENHANCED LOGGING: Starting Deepgram heartbeat');
+    
+    this.deepgramHeartbeatInterval = setInterval(() => {
+      if (this.deepgramConnection && this.deepgramConnection.readyState === WebSocket.OPEN) {
+        try {
+          // Send a small JSON message as a heartbeat
+          this.deepgramConnection.send(JSON.stringify({ 
+            type: "KeepAlive", 
+            timestamp: Date.now() 
+          }));
+          console.log('💓 ENHANCED LOGGING: Sent Deepgram heartbeat');
+        } catch (error) {
+          console.error('❌ ENHANCED LOGGING: Error sending Deepgram heartbeat:', error);
+          // If heartbeat fails, try to reconnect
+          this.deepgramReady = false;
+          this.scheduleDeepgramReconnect();
+        }
+      } else {
+        console.log('⚠️ ENHANCED LOGGING: Skipping heartbeat - Deepgram connection not ready');
+      }
+    }, this.deepgramHeartbeatIntervalMs);
+  }
+  
+  // Stop the Deepgram heartbeat
+  stopDeepgramHeartbeat() {
+    if (this.deepgramHeartbeatInterval) {
+      clearInterval(this.deepgramHeartbeatInterval);
+      this.deepgramHeartbeatInterval = null;
+      console.log('💓 ENHANCED LOGGING: Stopped Deepgram heartbeat');
+    }
+  }
+
   startDeepgramConnection() {
     if (!this.deepgramApiKey) {
       console.error('❌ ENHANCED LOGGING: No Deepgram API key provided');
@@ -376,6 +417,9 @@ class AudioWebSocketServer {
       
       // Send any buffered audio data
       this.sendBufferedAudio();
+      
+      // CRITICAL FIX: Start heartbeat to keep connection alive
+      this.startDeepgramHeartbeat();
       
       // Notify web app that Deepgram is ready
       if (this.webAppConnection && this.webAppConnection.readyState === WebSocket.OPEN) {
@@ -451,6 +495,9 @@ class AudioWebSocketServer {
       this.deepgramReady = false;
       console.log('❌ ENHANCED LOGGING: Deepgram ready flag set to false due to error');
       
+      // Stop heartbeat on error
+      this.stopDeepgramHeartbeat();
+      
       // Schedule reconnection attempt if transcription is still active
       if (this.transcriptionActive) {
         this.scheduleDeepgramReconnect();
@@ -473,6 +520,9 @@ class AudioWebSocketServer {
       // CRITICAL: Reset Deepgram ready flag on close
       this.deepgramReady = false;
       console.log('🔗 ENHANCED LOGGING: Deepgram ready flag set to false due to connection close');
+      
+      // Stop heartbeat on close
+      this.stopDeepgramHeartbeat();
       
       // Log common close codes for debugging
       switch (code) {
@@ -528,6 +578,9 @@ class AudioWebSocketServer {
       clearTimeout(this.deepgramReconnectTimer);
       this.deepgramReconnectTimer = null;
     }
+    
+    // Stop heartbeat
+    this.stopDeepgramHeartbeat();
     
     if (this.deepgramConnection) {
       console.log('🛑 ENHANCED LOGGING: Closing Deepgram connection');
