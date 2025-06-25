@@ -1,5 +1,3 @@
-'use client';
-
 const { ipcRenderer, shell } = require('electron');
 
 class DesktopRenderer {
@@ -556,32 +554,54 @@ class DesktopRenderer {
     }
     
     processAudioChunk(chunk) {
+        console.log('🎧 ENHANCED LOGGING: Processing audio chunk for playback');
+        console.log('🎧 ENHANCED LOGGING: Chunk size:', chunk.size);
+        console.log('🎧 ENHANCED LOGGING: Chunk type:', chunk.type);
+        
+        // CRITICAL FIX: Get the actual MIME type from the MediaRecorder
+        let actualMimeType = 'audio/webm;codecs=opus'; // Default fallback
+        
+        if (window.closeFlowActualMimeType) {
+            actualMimeType = window.closeFlowActualMimeType;
+            console.log('🎧 ENHANCED LOGGING: Using actual MIME type from MediaRecorder:', actualMimeType);
+        } else {
+            console.log('🎧 ENHANCED LOGGING: Using fallback MIME type:', actualMimeType);
+        }
+        
         // Add the chunk to our array
         this.audioChunks.push(chunk);
         
-        // Keep only the last 10 chunks to avoid memory issues
-        if (this.audioChunks.length > 10) {
+        // Keep only the last 5 chunks to avoid memory issues and reduce latency
+        if (this.audioChunks.length > 5) {
             this.audioChunks.shift();
+            console.log('🎧 ENHANCED LOGGING: Trimmed audio chunks to maintain buffer size');
         }
         
-        // Create a new blob from all chunks
-        const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm;codecs=opus' });
+        // CRITICAL FIX: Create a new blob with the correct MIME type
+        const audioBlob = new Blob(this.audioChunks, { type: actualMimeType });
+        console.log('🎧 ENHANCED LOGGING: Created audio blob with MIME type:', actualMimeType);
+        console.log('🎧 ENHANCED LOGGING: Audio blob size:', audioBlob.size);
         
         // Create a URL for the blob
         const audioUrl = URL.createObjectURL(audioBlob);
+        console.log('🎧 ENHANCED LOGGING: Created audio URL:', audioUrl);
         
         // Set the audio player source
         this.debugAudioPlayer.src = audioUrl;
         
-        // CRITICAL FIX: Explicitly call play() to ensure audio playback starts
-        this.debugAudioPlayer.play().catch(error => {
-            console.log('🎧 Audio play failed (this is normal for some chunks):', error.message);
+        // CRITICAL FIX: Explicitly call play() with error handling and logging
+        this.debugAudioPlayer.play().then(() => {
+            console.log('🎧 ENHANCED LOGGING: Audio playback started successfully');
+        }).catch(error => {
+            console.log('🎧 ENHANCED LOGGING: Audio play failed:', error.name, '-', error.message);
+            console.log('🎧 ENHANCED LOGGING: This is normal for some chunks, especially at the beginning');
         });
         
         // Clean up old URLs to avoid memory leaks
         setTimeout(() => {
             URL.revokeObjectURL(audioUrl);
-        }, 5000);
+            console.log('🎧 ENHANCED LOGGING: Cleaned up audio URL');
+        }, 3000); // Reduced cleanup time for better memory management
     }
     
     cleanupAudioDebug() {

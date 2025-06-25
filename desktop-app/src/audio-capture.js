@@ -186,6 +186,10 @@ class SystemAudioCapture {
             console.log('📊 ENHANCED LOGGING: MediaRecorder mimeType:', mediaRecorder.mimeType);
             console.log('📊 ENHANCED LOGGING: MediaRecorder state:', mediaRecorder.state);
 
+            // CRITICAL FIX: Store the actual MIME type for audio playback debugging
+            window.closeFlowActualMimeType = mediaRecorder.mimeType;
+            console.log('🎧 ENHANCED LOGGING: Stored actual MIME type for playback:', window.closeFlowActualMimeType);
+
             window.closeFlowMediaRecorder = mediaRecorder;
 
             // DIRECT WebSocket TRANSFER - NO IPC!
@@ -297,6 +301,7 @@ class SystemAudioCapture {
             }
             
             window.closeFlowMediaRecorder = null;
+            window.closeFlowActualMimeType = null; // Clear stored MIME type
             console.log('✅ Audio capture cleanup completed in renderer');
             
           } catch (error) {
