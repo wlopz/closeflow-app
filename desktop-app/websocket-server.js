@@ -31,7 +31,7 @@ class AudioWebSocketServer {
     
     // CRITICAL FIX: Add heartbeat mechanism to keep Deepgram connection alive
     this.deepgramHeartbeatInterval = null;
-    this.deepgramHeartbeatIntervalMs = 5000; // 15 seconds
+    this.deepgramHeartbeatIntervalMs = 10000; // 10 seconds
   }
 
   start() {
