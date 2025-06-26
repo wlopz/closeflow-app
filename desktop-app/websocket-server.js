@@ -474,6 +474,9 @@ class AudioWebSocketServer {
     dgUrl.searchParams.set('container', 'webm');
     
     console.log('🔗 ENHANCED LOGGING: Enhanced Deepgram URL with container format:', dgUrl.toString());
+    
+    // NEW: Add detailed URL logging to verify parameters
+    console.log('🔗 ENHANCED LOGGING: Deepgram connection URL being used:', dgUrl.toString());
 
     // CRITICAL FIX: Use local variable for WebSocket instance to prevent race conditions
     const ws = new WebSocket(dgUrl.toString(), ['token', this.deepgramApiKey]);
