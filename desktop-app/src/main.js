@@ -92,7 +92,7 @@ class CloseFlowDesktop {
     // Start connection management (simplified for Ably)
     this.startConnectionManagement();
     
-    // NEW: Start periodic ping to web app
+    // Start periodic ping to web app
     this.startWebAppPing();
   }
 
@@ -913,45 +913,53 @@ class CloseFlowDesktop {
         throw new Error('Failed to start system audio capture');
       }
 
-      // NEW: Send start command via Ably instead of HTTP
-      if (this.ablyDeepgramBridge && this.ablyDeepgramBridge.controlChannel) {
-        await this.ablyDeepgramBridge.controlChannel.publish('start-transcription', {
-          deepgramApiKey: process.env.DEEPGRAM_API_KEY || process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY,
+      // NEW: Send start command to web app via HTTP POST instead of Ably
+      console.log('🚀 ENHANCED LOGGING: Sending desktop-request-start-call to web app');
+      const response = await fetch(`${this.webAppUrl}/api/desktop-sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'desktop-request-start-call',
           deviceSettings: {
             input: this.selectedDevices.input,
             output: this.selectedDevices.output,
             systemAudioSource: this.selectedSystemAudioSource
           },
           timestamp: Date.now()
-        });
+        })
+      });
 
-        console.log('✅ Call analysis request sent via Ably');
-        this.showNotification('Starting Analysis', 'Call analysis initiated via Ably...');
-        
-        // Set timeout for confirmation
-        this.startCallTimeout = setTimeout(() => {
-          if (this.isStartingCall && !this.isCallActive) {
-            console.log('⚠️ Timeout waiting for call start confirmation');
-            this.isStartingCall = false;
-            this.isCallActive = true; // Assume success for Ably
-            this.startCallTimeout = null;
-            this.updateTrayMenu();
-            
-            this.sendToRenderer('zoom-status-changed', {
-              detected: this.isZoomDetected,
-              callActive: this.isCallActive,
-              isStartingCall: this.isStartingCall,
-              isStoppingCall: this.isStoppingCall
-            });
-            
-            this.showNotification('Analysis Started', 'Call analysis is now active.');
-          }
-        }, 5000); // Shorter timeout for Ably
-        
-        return { success: true };
-      } else {
-        throw new Error('Ably bridge not available');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to send start request to web app');
       }
+
+      console.log('✅ Desktop request to start call analysis sent to web app');
+      this.showNotification('Starting Analysis', 'Request sent to web app. Waiting for confirmation...');
+      
+      // Set timeout for confirmation
+      this.startCallTimeout = setTimeout(() => {
+        if (this.isStartingCall && !this.isCallActive) {
+          console.log('⚠️ Timeout waiting for call start confirmation from web app');
+          this.isStartingCall = false;
+          this.isCallActive = true; // Assume success for now
+          this.startCallTimeout = null;
+          this.updateTrayMenu();
+          
+          this.sendToRenderer('zoom-status-changed', {
+            detected: this.isZoomDetected,
+            callActive: this.isCallActive,
+            isStartingCall: this.isStartingCall,
+            isStoppingCall: this.isStoppingCall
+          });
+          
+          this.showNotification('Analysis Started', 'Call analysis is now active.');
+        }
+      }, 5000);
+      
+      return { success: true };
     } catch (error) {
       console.error('❌ Error starting call analysis:', error);
       this.isStartingCall = false;
@@ -988,21 +996,31 @@ class CloseFlowDesktop {
       // Stop system audio capture
       this.systemAudioCapture.stopCapture();
       
-      // NEW: Send stop command via Ably instead of HTTP
-      if (this.ablyDeepgramBridge && this.ablyDeepgramBridge.controlChannel) {
-        await this.ablyDeepgramBridge.controlChannel.publish('stop-transcription', {
+      // NEW: Send stop command to web app via HTTP POST instead of Ably
+      console.log('🛑 ENHANCED LOGGING: Sending desktop-request-stop-call to web app');
+      const response = await fetch(`${this.webAppUrl}/api/desktop-sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'desktop-request-stop-call',
           timestamp: Date.now()
-        });
+        })
+      });
 
-        console.log('✅ Sent stop-call-analysis message via Ably');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to send stop request to web app');
       }
 
-      this.showNotification('Stopping Analysis', 'Call analysis stopped.');
+      console.log('✅ Desktop request to stop call analysis sent to web app');
+      this.showNotification('Stopping Analysis', 'Request sent to web app. Waiting for confirmation...');
       
       // Set timeout for confirmation
       this.stopCallTimeout = setTimeout(() => {
         if (this.isStoppingCall && this.isCallActive) {
-          console.log('⚠️ Timeout waiting for stop confirmation');
+          console.log('⚠️ Timeout waiting for stop confirmation from web app');
           this.isStoppingCall = false;
           this.isCallActive = false;
           this.stopCallTimeout = null;
@@ -1017,7 +1035,7 @@ class CloseFlowDesktop {
           
           this.showNotification('Stop Completed', 'Call analysis has been stopped.');
         }
-      }, 3000); // Shorter timeout for Ably
+      }, 3000);
       
       return { success: true };
     } catch (error) {

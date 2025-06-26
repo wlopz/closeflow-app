@@ -364,6 +364,95 @@ export async function POST(request: NextRequest) {
         console.log('📮 ENHANCED LOGGING: Desktop message handled, result:', result);
         return Response.json(result);
 
+      case 'desktop-request-start-call':
+        console.log('🚀 ENHANCED LOGGING: Desktop requested call start via HTTP');
+        console.log('🚀 ENHANCED LOGGING: Device settings:', body.deviceSettings);
+        
+        // Get the Deepgram API key from environment
+        const deepgramApiKey = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
+        console.log('🔑 ENHANCED LOGGING: Deepgram API key available:', !!deepgramApiKey);
+        
+        if (!deepgramApiKey) {
+          console.error('❌ ENHANCED LOGGING: No Deepgram API key found in web app environment');
+          return Response.json({ error: 'Deepgram API key not configured' }, { status: 500 });
+        }
+
+        // Store the start request message for web app to pick up
+        const startRequestMessage = {
+          id: uuidv4(),
+          type: 'desktop-call-started',
+          deviceSettings: body.deviceSettings,
+          timestamp: body.timestamp
+        };
+        
+        const { error: startRequestError } = await supabase.from('desktop_messages_queue').insert({
+          id: startRequestMessage.id,
+          message_type: startRequestMessage.type,
+          sender: 'desktop',
+          recipient: 'webapp',
+          content: startRequestMessage
+        });
+
+        if (startRequestError) {
+          console.error('❌ ENHANCED LOGGING: Error storing desktop start request:', startRequestError);
+          return Response.json({ error: 'Failed to store start request' }, { status: 500 });
+        }
+
+        // Update desktop ping and call state
+        const { error: startPingError } = await supabase
+          .from('desktop_sync_state')
+          .update({ 
+            last_desktop_ping: new Date().toISOString(),
+            web_app_call_active: true 
+          })
+          .eq('id', DESKTOP_SYNC_STATE_ID);
+
+        if (startPingError) {
+          console.error('❌ ENHANCED LOGGING: Error updating desktop sync state:', startPingError);
+        }
+
+        console.log('✅ ENHANCED LOGGING: Desktop start request processed successfully');
+        return Response.json({ success: true, message: 'Start request received and will be processed by web app' });
+
+      case 'desktop-request-stop-call':
+        console.log('🛑 ENHANCED LOGGING: Desktop requested call stop via HTTP');
+        
+        // Store the stop request message for web app to pick up
+        const stopRequestMessage = {
+          id: uuidv4(),
+          type: 'desktop-call-stopped',
+          timestamp: body.timestamp
+        };
+        
+        const { error: stopRequestError } = await supabase.from('desktop_messages_queue').insert({
+          id: stopRequestMessage.id,
+          message_type: stopRequestMessage.type,
+          sender: 'desktop',
+          recipient: 'webapp',
+          content: stopRequestMessage
+        });
+
+        if (stopRequestError) {
+          console.error('❌ ENHANCED LOGGING: Error storing desktop stop request:', stopRequestError);
+          return Response.json({ error: 'Failed to store stop request' }, { status: 500 });
+        }
+
+        // Update desktop ping and call state
+        const { error: stopPingError } = await supabase
+          .from('desktop_sync_state')
+          .update({ 
+            last_desktop_ping: new Date().toISOString(),
+            web_app_call_active: false 
+          })
+          .eq('id', DESKTOP_SYNC_STATE_ID);
+
+        if (stopPingError) {
+          console.error('❌ ENHANCED LOGGING: Error updating desktop sync state:', stopPingError);
+        }
+
+        console.log('✅ ENHANCED LOGGING: Desktop stop request processed successfully');
+        return Response.json({ success: true, message: 'Stop request received and will be processed by web app' });
+
       case 'message-ack':
         // New endpoint to acknowledge message processing
         console.log('✅ ENHANCED LOGGING: Message acknowledgment received');

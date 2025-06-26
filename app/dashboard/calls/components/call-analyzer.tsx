@@ -80,6 +80,9 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
   const controlChannel = useRef<Ably.RealtimeChannel | null>(null);
   const resultsChannel = useRef<Ably.RealtimeChannel | null>(null);
   
+  // Desktop message polling
+  const desktopMessagePolling = useRef<NodeJS.Timeout | null>(null);
+  
   const recorderRef = useRef<MediaRecorder>();
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
@@ -136,6 +139,83 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     const interval = setInterval(checkDesktopConnection, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  // NEW: Poll for desktop messages
+  useEffect(() => {
+    if (live) {
+      startDesktopMessagePolling();
+    } else {
+      stopDesktopMessagePolling();
+    }
+    
+    return () => stopDesktopMessagePolling();
+  }, [live]);
+
+  const startDesktopMessagePolling = () => {
+    console.log('📨 ENHANCED LOGGING: Starting desktop message polling');
+    
+    desktopMessagePolling.current = setInterval(async () => {
+      try {
+        const response = await fetch('/api/desktop-sync?action=get-messages-for-webapp');
+        const data = await response.json();
+        
+        if (data.messages && data.messages.length > 0) {
+          console.log('📨 ENHANCED LOGGING: Received messages from desktop:', data.messages);
+          
+          for (const message of data.messages) {
+            await handleDesktopMessage(message);
+            
+            // Acknowledge the message
+            if (message.id) {
+              await fetch('/api/desktop-sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  type: 'message-ack',
+                  messageId: message.id
+                })
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.error('❌ ENHANCED LOGGING: Error polling desktop messages:', error);
+      }
+    }, 1000); // Poll every second
+  };
+
+  const stopDesktopMessagePolling = () => {
+    if (desktopMessagePolling.current) {
+      clearInterval(desktopMessagePolling.current);
+      desktopMessagePolling.current = null;
+      console.log('📨 ENHANCED LOGGING: Stopped desktop message polling');
+    }
+  };
+
+  const handleDesktopMessage = async (message: any) => {
+    console.log('📨 ENHANCED LOGGING: Processing desktop message:', message);
+    
+    switch (message.type) {
+      case 'desktop-call-started':
+        console.log('🎯 ENHANCED LOGGING: Desktop call started message received');
+        if (!live) {
+          console.log('🎯 ENHANCED LOGGING: Starting live analysis from desktop message');
+          await startLive(true);
+        }
+        break;
+        
+      case 'desktop-call-stopped':
+        console.log('🛑 ENHANCED LOGGING: Desktop call stopped message received');
+        if (live) {
+          console.log('🛑 ENHANCED LOGGING: Stopping live analysis from desktop message');
+          stopLive();
+        }
+        break;
+        
+      default:
+        console.log('❓ ENHANCED LOGGING: Unknown desktop message type:', message.type);
+    }
+  };
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -317,17 +397,20 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
                 timestamp_offset: Math.floor((insight.timestamp - callStartTime) / 1000)
               });
 
-              // Notify desktop app of new insight via Ably
+              // Notify desktop app of new insight via API
               try {
-                if (controlChannel.current) {
-                  await controlChannel.current.publish('insight-generated', {
+                await fetch('/api/desktop-sync', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    type: 'insight-generated',
                     content: insight.content,
                     insightType: insight.type,
                     timestamp: Date.now()
-                  });
-                }
+                  })
+                });
               } catch (error) {
-                console.error('Error notifying desktop of insight via Ably:', error);
+                console.error('Error notifying desktop of insight:', error);
               }
             }
           }
@@ -375,17 +458,20 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
       if (call) {
         console.log('✅ Created call session:', call.id);
         
-        // Notify desktop app of call start via Ably
+        // Notify desktop app of call start via API
         try {
-          if (controlChannel.current) {
-            await controlChannel.current.publish('call-status-update', {
+          await fetch('/api/desktop-sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'call-status-update',
               status: 'started',
               callId: call.id,
               timestamp: Date.now()
-            });
-          }
+            })
+          });
         } catch (error) {
-          console.error('Error notifying desktop of call start via Ably:', error);
+          console.error('Error notifying desktop of call start:', error);
         }
         
         return call.id;
@@ -409,17 +495,20 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
       await CallsService.endCall(callId);
       console.log('✅ Ended call session:', callId);
       
-      // Notify desktop app of call end via Ably
+      // Notify desktop app of call end via API
       try {
-        if (controlChannel.current) {
-          await controlChannel.current.publish('call-status-update', {
+        await fetch('/api/desktop-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'call-status-update',
             status: 'ended',
             callId: callId,
             timestamp: Date.now()
-          });
-        }
+          })
+        });
       } catch (error) {
-        console.error('Error notifying desktop of call end via Ably:', error);
+        console.error('Error notifying desktop of call end:', error);
       }
     } catch (error) {
       console.error('❌ Error ending call session:', error);
@@ -433,9 +522,6 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     
     const ablyApiKey = process.env.NEXT_PUBLIC_ABLY_API_KEY;
     const deepgramApiKey = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
-    
-    // 🚨🚨🚨 CRITICAL DEBUG: Add the debug log here
-    console.log('🚨🚨🚨 CRITICAL DEBUG: Raw Deepgram API key in web app:', deepgramApiKey);
     
     console.log('🔑 ENHANCED LOGGING: Ably API key check - Present:', !!ablyApiKey);
     console.log('🔑 ENHANCED LOGGING: Deepgram API key check - Present:', !!deepgramApiKey);
@@ -597,11 +683,11 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
         }
       });
 
-      // Send start transcription command to desktop app
+      // NEW: Send start transcription command via Ably with Deepgram API key from web app
       console.log('🔗 ENHANCED LOGGING: Sending start-transcription command via Ably...');
       console.log('🔑 ENHANCED LOGGING: Deepgram API key being sent from web app:', !!deepgramApiKey);
       await controlChannel.current.publish('start-transcription', {
-        deepgramApiKey: deepgramApiKey,
+        deepgramApiKey: deepgramApiKey, // Web app provides the API key
         timestamp: Date.now()
       });
 
