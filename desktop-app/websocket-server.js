@@ -40,6 +40,10 @@ class AudioWebSocketServer {
     // CRITICAL FIX: Add heartbeat mechanism to keep Deepgram connection alive
     this.deepgramHeartbeatInterval = null;
     this.deepgramHeartbeatIntervalMs = 5000; // 5 seconds (as set by user)
+    
+    // CRITICAL FIX: Add audio format validation
+    this.audioFormatValidated = false;
+    this.receivedChunkCount = 0;
   }
 
   start() {
@@ -191,6 +195,9 @@ class AudioWebSocketServer {
           console.log('🎤 ENHANCED LOGGING: Transcription active flag:', this.transcriptionActive);
           console.log('🔑 ENHANCED LOGGING: API key available:', !!this.deepgramApiKey);
           
+          // CRITICAL FIX: Validate audio format on first few chunks
+          this.validateAudioFormat(data);
+          
           // CRITICAL FIX: Always process audio data for buffering, regardless of transcriptionActive flag
           // The transcriptionActive flag should only control Deepgram connection establishment
           this.handleAudioData(data);
@@ -202,6 +209,30 @@ class AudioWebSocketServer {
         console.error('❌ ENHANCED LOGGING: Error handling desktop renderer message:', error);
       }
     });
+  }
+
+  // CRITICAL FIX: Add audio format validation
+  validateAudioFormat(audioData) {
+    this.receivedChunkCount++;
+    
+    if (!this.audioFormatValidated && this.receivedChunkCount <= 5) {
+      console.log('🔍 ENHANCED LOGGING: Validating audio format (chunk', this.receivedChunkCount, ')');
+      
+      // Check for WebM container signature
+      const webmSignature = Buffer.from([0x1A, 0x45, 0xDF, 0xA3]);
+      if (audioData.length >= 4 && audioData.subarray(0, 4).equals(webmSignature)) {
+        console.log('✅ ENHANCED LOGGING: Valid WebM container detected');
+        this.audioFormatValidated = true;
+      } else if (this.receivedChunkCount === 1) {
+        console.log('🔍 ENHANCED LOGGING: First chunk header:', audioData.slice(0, Math.min(32, audioData.length)));
+        console.log('🔍 ENHANCED LOGGING: Expected WebM signature:', webmSignature);
+      }
+      
+      if (this.receivedChunkCount === 5 && !this.audioFormatValidated) {
+        console.log('⚠️ ENHANCED LOGGING: Audio format validation failed after 5 chunks');
+        console.log('⚠️ ENHANCED LOGGING: This may cause Deepgram connection issues');
+      }
+    }
   }
 
   // Enhanced audio data handling with buffering
@@ -262,6 +293,13 @@ class AudioWebSocketServer {
     
     console.log('📦 ENHANCED LOGGING: Audio data buffered, new buffer size:', this.audioBuffer.length);
     console.log('📦 ENHANCED LOGGING: Buffer age:', bufferAge, 'ms');
+    
+    // CRITICAL FIX: Don't attempt to reconnect if we don't have an API key
+    if (!this.deepgramApiKey) {
+      console.log('⚠️ ENHANCED LOGGING: Cannot reconnect to Deepgram - no API key available');
+      console.log('🔑 ENHANCED LOGGING: Current deepgramApiKey state:', this.deepgramApiKey);
+      return;
+    }
     
     // If transcription is active but Deepgram is not connected, try to reconnect
     if (this.transcriptionActive && (!this.deepgramConnection || this.deepgramConnection.readyState !== WebSocket.OPEN)) {
@@ -324,13 +362,6 @@ class AudioWebSocketServer {
   scheduleDeepgramReconnect() {
     // Don't schedule if we're already reconnecting or if transcription is not active
     if (this.deepgramReconnectTimer || !this.transcriptionActive) {
-      return;
-    }
-    
-    // CRITICAL FIX: Don't attempt to reconnect if we don't have an API key
-    if (!this.deepgramApiKey) {
-      console.log('⚠️ ENHANCED LOGGING: Cannot reconnect to Deepgram - no API key available');
-      console.log('🔑 ENHANCED LOGGING: Current deepgramApiKey state:', this.deepgramApiKey);
       return;
     }
     
@@ -434,17 +465,15 @@ class AudioWebSocketServer {
     dgUrl.searchParams.set('punctuate', 'true');
     dgUrl.searchParams.set('smart_format', 'true');
     
-    // CRITICAL FIX: Add explicit encoding and sample rate parameters
-    dgUrl.searchParams.set('encoding', 'opus');
+    // CRITICAL FIX: Try different audio format configurations
+    dgUrl.searchParams.set('encoding', 'webm');
     dgUrl.searchParams.set('sample_rate', '48000');
+    dgUrl.searchParams.set('channels', '1');
     
-    // SIMPLIFIED: Remove problematic parameters that might be causing connection issues
-    // dgUrl.searchParams.set('diarize', 'true');
-    // dgUrl.searchParams.set('utterances', 'true');
-    // dgUrl.searchParams.set('endpointing', '10000');
-
-    console.log('🔗 ENHANCED LOGGING: Simplified Deepgram URL:', dgUrl.toString());
-    console.log('🔗 ENHANCED LOGGING: Removed diarize, utterances, and endpointing parameters for better stability');
+    // CRITICAL FIX: Add container format specification
+    dgUrl.searchParams.set('container', 'webm');
+    
+    console.log('🔗 ENHANCED LOGGING: Enhanced Deepgram URL with container format:', dgUrl.toString());
 
     // CRITICAL FIX: Use local variable for WebSocket instance to prevent race conditions
     const ws = new WebSocket(dgUrl.toString(), ['token', this.deepgramApiKey]);
@@ -492,7 +521,7 @@ class AudioWebSocketServer {
         const message = JSON.parse(data);
         console.log('📨 ENHANCED LOGGING: Parsed Deepgram message type:', message.type);
         
-        // Enhanced logging for different message types
+        // CRITICAL FIX: Enhanced logging for different message types
         if (message.type === 'Results') {
           console.log('📝 ENHANCED LOGGING: Deepgram Results message received');
           console.log('📝 ENHANCED LOGGING: Channel data exists:', !!message.channel);
@@ -506,18 +535,23 @@ class AudioWebSocketServer {
             console.log('📝 ENHANCED LOGGING: Is final:', message.is_final);
             console.log('📝 ENHANCED LOGGING: Words count:', alternative.words?.length || 0);
             
-            // ENHANCED: Log the entire deepgram result for debugging
-            console.log('📝 ENHANCED LOGGING: Complete Deepgram result object:', JSON.stringify(message, null, 2));
+            // ENHANCED: Log speaker information if available
+            if (alternative.words && alternative.words.length > 0) {
+              const speakers = new Set(alternative.words.map(w => w.speaker).filter(s => s !== undefined));
+              console.log('📝 ENHANCED LOGGING: Detected speakers:', Array.from(speakers));
+            }
           } else {
             console.log('📝 ENHANCED LOGGING: No alternatives found in Deepgram result');
-            console.log('📝 ENHANCED LOGGING: Complete message structure:', JSON.stringify(message, null, 2));
           }
         } else if (message.type === 'Metadata') {
           console.log('📊 ENHANCED LOGGING: Deepgram Metadata message received');
-          console.log('📊 ENHANCED LOGGING: Metadata content:', JSON.stringify(message, null, 2));
+          console.log('📊 ENHANCED LOGGING: Request ID:', message.request_id);
+          console.log('📊 ENHANCED LOGGING: Model info:', message.model_info);
         } else if (message.type === 'UtteranceEnd') {
           console.log('🔚 ENHANCED LOGGING: Deepgram UtteranceEnd message received');
           console.log('🔚 ENHANCED LOGGING: Last word end:', message.last_word_end);
+        } else if (message.type === 'SpeechStarted') {
+          console.log('🎤 ENHANCED LOGGING: Deepgram SpeechStarted message received');
         } else {
           console.log('❓ ENHANCED LOGGING: Unknown Deepgram message type:', message.type);
           console.log('❓ ENHANCED LOGGING: Complete unknown message:', JSON.stringify(message, null, 2));

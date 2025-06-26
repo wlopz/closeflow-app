@@ -58,7 +58,7 @@ class SystemAudioCapture {
     try {
       console.log('🎤 Starting system audio capture...');
 
-      // Enhanced renderer-based audio capture with explicit MIME type
+      // Enhanced renderer-based audio capture with multiple MIME type attempts
       const success = await this.mainWindow.webContents.executeJavaScript(`
         (async () => {
           try {
@@ -111,7 +111,7 @@ class SystemAudioCapture {
 
             console.log('🎤 ENHANCED LOGGING: About to call getUserMedia with source:', '${this.selectedSourceId}');
             
-            // CRITICAL FIX: Explicitly set sampleRate to 48000 Hz for Opus compatibility
+            // CRITICAL FIX: Enhanced constraints with better audio settings
             const constraints = {
               audio: {
                 chromeMediaSource: 'desktop',
@@ -120,7 +120,10 @@ class SystemAudioCapture {
                 channelCount: 1,
                 echoCancellation: false,
                 noiseSuppression: false,
-                autoGainControl: false
+                autoGainControl: false,
+                // CRITICAL FIX: Add additional constraints for better compatibility
+                latency: 0.01, // 10ms latency for real-time processing
+                volume: 1.0
               },
               video: false
             };
@@ -149,38 +152,48 @@ class SystemAudioCapture {
               id: track.id,
               label: track.label,
               enabled: track.enabled,
-              readyState: track.readyState
+              readyState: track.readyState,
+              settings: track.getSettings()
             })));
 
-            // CRITICAL FIX: Create MediaRecorder with explicit MIME type for better compatibility
-            console.log('🎬 ENHANCED LOGGING: Creating MediaRecorder with explicit MIME type...');
+            // CRITICAL FIX: Try multiple MIME types for better compatibility
+            console.log('🎬 ENHANCED LOGGING: Creating MediaRecorder with enhanced MIME type selection...');
             
-            // Check supported MIME types
-            const supportedTypes = [
+            // Prioritized list of MIME types to try
+            const mimeTypes = [
               'audio/webm;codecs=opus',
               'audio/webm',
-              'audio/mp4',
-              'audio/ogg;codecs=opus'
+              'audio/ogg;codecs=opus',
+              'audio/mp4;codecs=mp4a.40.2',
+              'audio/mpeg'
             ];
             
             let selectedMimeType = '';
-            for (const type of supportedTypes) {
-              if (MediaRecorder.isTypeSupported(type)) {
-                selectedMimeType = type;
-                console.log('✅ ENHANCED LOGGING: Selected supported MIME type:', type);
-                break;
+            let mediaRecorder = null;
+            
+            for (const mimeType of mimeTypes) {
+              if (MediaRecorder.isTypeSupported(mimeType)) {
+                console.log('✅ ENHANCED LOGGING: Attempting MIME type:', mimeType);
+                try {
+                  mediaRecorder = new MediaRecorder(stream, { mimeType });
+                  selectedMimeType = mimeType;
+                  console.log('✅ ENHANCED LOGGING: Successfully created MediaRecorder with:', mimeType);
+                  break;
+                } catch (error) {
+                  console.log('⚠️ ENHANCED LOGGING: Failed to create MediaRecorder with', mimeType, ':', error.message);
+                  continue;
+                }
+              } else {
+                console.log('❌ ENHANCED LOGGING: MIME type not supported:', mimeType);
               }
             }
             
-            if (!selectedMimeType) {
-              console.log('⚠️ ENHANCED LOGGING: No preferred MIME types supported, using default');
-              selectedMimeType = '';
+            // Fallback to default if none worked
+            if (!mediaRecorder) {
+              console.log('🔧 ENHANCED LOGGING: Using default MediaRecorder (no MIME type specified)');
+              mediaRecorder = new MediaRecorder(stream);
+              selectedMimeType = mediaRecorder.mimeType || 'unknown';
             }
-            
-            const mediaRecorderOptions = selectedMimeType ? { mimeType: selectedMimeType } : {};
-            console.log('🔧 ENHANCED LOGGING: MediaRecorder options:', mediaRecorderOptions);
-            
-            const mediaRecorder = new MediaRecorder(stream, mediaRecorderOptions);
             
             console.log('✅ ENHANCED LOGGING: MediaRecorder created successfully');
             console.log('📊 ENHANCED LOGGING: MediaRecorder mimeType:', mediaRecorder.mimeType);
@@ -228,8 +241,8 @@ class SystemAudioCapture {
             console.log('🎤 ENHANCED LOGGING: About to start MediaRecorder...');
             console.log('📊 ENHANCED LOGGING: MediaRecorder state before start:', mediaRecorder.state);
             
-            // Use 1-second chunks for better real-time performance
-            mediaRecorder.start(1000);
+            // CRITICAL FIX: Use smaller chunks for better real-time performance
+            mediaRecorder.start(500); // 500ms chunks for better responsiveness
             
             console.log('📊 ENHANCED LOGGING: MediaRecorder state after start:', mediaRecorder.state);
             console.log('✅ ENHANCED LOGGING: DIRECT WebSocket audio capture started successfully');
@@ -257,7 +270,7 @@ class SystemAudioCapture {
           }));
         }
 
-        console.log('✅ System audio capture started successfully with DIRECT WebSocket and explicit MIME type');
+        console.log('✅ System audio capture started successfully with DIRECT WebSocket and enhanced MIME type selection');
         return true;
       } else {
         throw new Error('Failed to start direct WebSocket audio capture in renderer process');

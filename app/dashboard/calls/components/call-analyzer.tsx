@@ -60,6 +60,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [callStartTime, setCallStartTime] = useState<number>(0);
   const [desktopConnected, setDesktopConnected] = useState(false);
+  const [deepgramConnected, setDeepgramConnected] = useState(false);
   
   // State for building complete conversations
   const [currentSpeaker, setCurrentSpeaker] = useState<number | null>(null);
@@ -443,6 +444,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     }
     
     console.log('🔗 ENHANCED LOGGING: Deepgram API key check: Present');
+    console.log('🔗 ENHANCED LOGGING: API key length:', token.length);
 
     // Check authentication state before proceeding
     if (loading) {
@@ -480,6 +482,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
       const ws = new WebSocket('ws://localhost:8080/web-app');
       socketRef.current = ws;
       setConnecting(true);
+      setDeepgramConnected(false);
 
       ws.onopen = async () => {
         console.log('✅ Connected to local WebSocket server');
@@ -517,9 +520,16 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
         }
       };
 
-      ws.onerror = () => {
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
         setConnecting(false);
         stopLive();
+        
+        toast({
+          variant: 'destructive',
+          title: 'Connection Error',
+          description: 'Failed to connect to audio processing server. Please try again.'
+        });
       };
 
       ws.onmessage = (evt) => {
@@ -559,13 +569,32 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
             }
           } else if (msg.type === 'deepgram-connected') {
             console.log('✅ WebSocket server connected to Deepgram');
+            setDeepgramConnected(true);
+            
+            toast({
+              title: 'Transcription Ready',
+              description: 'Connected to Deepgram transcription service.'
+            });
           } else if (msg.type === 'deepgram-error') {
             console.error('❌ Deepgram error via WebSocket:', msg.error);
+            setDeepgramConnected(false);
+            
             toast({
               variant: 'destructive',
               title: 'Transcription Error',
-              description: 'Failed to connect to transcription service.'
+              description: 'Failed to connect to transcription service: ' + msg.error
             });
+          } else if (msg.type === 'deepgram-disconnected') {
+            console.log('⚠️ Deepgram disconnected:', msg.closeCode, msg.closeReason);
+            setDeepgramConnected(false);
+            
+            if (msg.closeCode === 1011) {
+              toast({
+                variant: 'destructive',
+                title: 'Transcription Timeout',
+                description: 'Deepgram connection timed out. This may be due to no audio being detected.'
+              });
+            }
           }
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);
@@ -577,6 +606,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
         finalizeCurrentConversation();
         setLive(false);
         setConnecting(false);
+        setDeepgramConnected(false);
         
         // CRITICAL: Send confirmation to desktop app that call analysis has stopped
         try {
@@ -614,6 +644,12 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
         endCallSession(currentCallId);
         setCurrentCallId(null);
       }
+      
+      toast({
+        variant: 'destructive',
+        title: 'Connection Error',
+        description: 'Failed to connect to audio processing server. Please try again.'
+      });
     }
   }
 
@@ -711,6 +747,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     
     setLive(false);
     setConnecting(false);
+    setDeepgramConnected(false);
     
     // CRITICAL: Signal to parent that desktop call is no longer active
     if (onDesktopCallStateChange) {
@@ -1013,6 +1050,18 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
               )}></div>
               Desktop {desktopConnected ? 'Connected' : 'Disconnected'}
             </div>
+            
+            <div className={cn(
+              "text-sm flex items-center gap-2",
+              deepgramConnected ? "text-green-600" : "text-yellow-600"
+            )}>
+              <div className={cn(
+                "w-2 h-2 rounded-full",
+                deepgramConnected ? "bg-green-500 animate-pulse" : "bg-yellow-500"
+              )}></div>
+              Transcription {deepgramConnected ? 'Active' : 'Connecting...'}
+            </div>
+            
             {isDesktopInitiatedCall && (
               <div className="text-sm text-muted-foreground flex items-center gap-2">
                 <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
@@ -1104,7 +1153,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
                         )}
                       >
                         {getInsightIcon(insight.type)}
-                        <div className="flex-1">
+                        <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between mb-1">
                             <div className="flex items-center gap-2">
                               <span className="text-sm font-medium">
