@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/supabase/hooks';
 import { CallsService } from '@/lib/supabase/calls';
 import { CallFeedbackModal } from '@/components/dashboard/call-feedback-modal';
+import * as Ably from 'ably';
 
 interface Message {
   id: string;
@@ -74,8 +75,12 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
   const longSpeechTimer = useRef<NodeJS.Timeout | null>(null);
   const currentSegmentStartTime = useRef<number>(0);
   
+  // Ably client and channels
+  const ablyClient = useRef<Ably.Realtime | null>(null);
+  const controlChannel = useRef<Ably.RealtimeChannel | null>(null);
+  const resultsChannel = useRef<Ably.RealtimeChannel | null>(null);
+  
   const recorderRef = useRef<MediaRecorder>();
-  const socketRef = useRef<WebSocket>();
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const { user, loading } = useAuth();
@@ -200,7 +205,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     currentSegmentStartTime.current = 0;
   };
 
-  // Handle new transcript from WebSocket server (which gets it from Deepgram)
+  // Handle new transcript from Ably (which gets it from Deepgram via desktop app)
   const handleTranscript = (transcript: string, isFinal: boolean, deepgramSpeaker?: number) => {
     if (!transcript || transcript.trim() === '') return;
     
@@ -312,19 +317,17 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
                 timestamp_offset: Math.floor((insight.timestamp - callStartTime) / 1000)
               });
 
-              // Notify desktop app of new insight
+              // Notify desktop app of new insight via Ably
               try {
-                await fetch('/api/desktop-sync', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    type: 'insight-generated',
+                if (controlChannel.current) {
+                  await controlChannel.current.publish('insight-generated', {
                     content: insight.content,
-                    insightType: insight.type
-                  })
-                });
+                    insightType: insight.type,
+                    timestamp: Date.now()
+                  });
+                }
               } catch (error) {
-                console.error('Error notifying desktop of insight:', error);
+                console.error('Error notifying desktop of insight via Ably:', error);
               }
             }
           }
@@ -372,19 +375,17 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
       if (call) {
         console.log('✅ Created call session:', call.id);
         
-        // Notify desktop app of call start
+        // Notify desktop app of call start via Ably
         try {
-          await fetch('/api/desktop-sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              type: 'call-status-update',
+          if (controlChannel.current) {
+            await controlChannel.current.publish('call-status-update', {
               status: 'started',
-              callId: call.id
-            })
-          });
+              callId: call.id,
+              timestamp: Date.now()
+            });
+          }
         } catch (error) {
-          console.error('Error notifying desktop of call start:', error);
+          console.error('Error notifying desktop of call start via Ably:', error);
         }
         
         return call.id;
@@ -408,43 +409,46 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
       await CallsService.endCall(callId);
       console.log('✅ Ended call session:', callId);
       
-      // Notify desktop app of call end
+      // Notify desktop app of call end via Ably
       try {
-        await fetch('/api/desktop-sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'call-status-update',
+        if (controlChannel.current) {
+          await controlChannel.current.publish('call-status-update', {
             status: 'ended',
-            callId: callId
-          })
-        });
+            callId: callId,
+            timestamp: Date.now()
+          });
+        }
       } catch (error) {
-        console.error('Error notifying desktop of call end:', error);
+        console.error('Error notifying desktop of call end via Ably:', error);
       }
     } catch (error) {
       console.error('❌ Error ending call session:', error);
     }
   };
 
-  // CRITICAL FIX: Modified to use API endpoint instead of direct WebSocket connection
+  // Connect to Ably and set up channels
   async function connectWithRetry() {
-    console.log('🔗 ENHANCED LOGGING: Starting connectWithRetry function');
+    console.log('🔗 ENHANCED LOGGING: Starting connectWithRetry function with Ably');
     console.log('🔗 ENHANCED LOGGING: Current state:', { live, connecting });
     
-    const token = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
+    const ablyApiKey = process.env.NEXT_PUBLIC_ABLY_API_KEY;
+    const deepgramApiKey = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
     
-    // CRITICAL DEBUG: Log the token value to diagnose the issue
-    console.log('🔑 ENHANCED LOGGING: Deepgram API key check - Raw value:', token);
-    console.log('🔑 ENHANCED LOGGING: Deepgram API key check - Type:', typeof token);
-    console.log('🔑 ENHANCED LOGGING: Deepgram API key check - Length:', token?.length || 0);
-    console.log('🔑 ENHANCED LOGGING: Deepgram API key check - Is undefined:', token === undefined);
-    console.log('🔑 ENHANCED LOGGING: Deepgram API key check - Is empty string:', token === '');
-    console.log('🔑 ENHANCED LOGGING: Deepgram API key check - Truthy:', !!token);
+    console.log('🔑 ENHANCED LOGGING: Ably API key check - Present:', !!ablyApiKey);
+    console.log('🔑 ENHANCED LOGGING: Deepgram API key check - Present:', !!deepgramApiKey);
     
-    if (!token) {
+    if (!ablyApiKey) {
+      console.log('❌ ENHANCED LOGGING: No Ably API key found');
+      toast({
+        variant: 'destructive',
+        title: 'Configuration Error',
+        description: 'Ably API key is not configured.'
+      });
+      return;
+    }
+
+    if (!deepgramApiKey) {
       console.log('❌ ENHANCED LOGGING: No Deepgram API key found');
-      console.log('❌ ENHANCED LOGGING: Environment variables available:', Object.keys(process.env).filter(key => key.includes('DEEPGRAM')));
       toast({
         variant: 'destructive',
         title: 'Configuration Error',
@@ -485,74 +489,48 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     setCallStartTime(Date.now());
 
     try {
-      // CRITICAL FIX: Use API endpoint instead of direct WebSocket connection
-      // This will connect to the desktop app's WebSocket server via the API
       setConnecting(true);
       
-      // Set up WebSocket connection to the API endpoint
-      const ws = new WebSocket(`ws://${window.location.hostname}:8080/web-app`);
-      socketRef.current = ws;
+      // Initialize Ably client
+      console.log('🔗 ENHANCED LOGGING: Initializing Ably client...');
+      const client = new Ably.Realtime({
+        key: ablyApiKey,
+        clientId: `webapp-${Date.now()}`,
+      });
+      
+      ablyClient.current = client;
 
-      ws.onopen = async () => {
-        console.log('✅ Connected to local WebSocket server');
-        setLive(true);
-        setConnecting(false);
-        setMessages([]);
-        setInsights([]);
-        setCurrentConversation('');
-        setCurrentSpeaker(null);
-        conversationAccumulator.current = '';
-        lastSpeaker.current = null;
-        clearSilenceTimer();
-        clearLongSpeechTimer();
-        currentSegmentStartTime.current = 0;
-        
-        // Send Deepgram API key to WebSocket server to start transcription
-        console.log('🔑 ENHANCED LOGGING: About to send API key to WebSocket server');
-        console.log('🔑 ENHANCED LOGGING: Token value being sent:', token);
-        console.log('🔑 ENHANCED LOGGING: Token length being sent:', token.length);
-        
-        ws.send(JSON.stringify({
-          type: 'start-transcription',
-          deepgramApiKey: token
-        }));
-        
-        console.log('🔑 ENHANCED LOGGING: API key sent to WebSocket server successfully');
-        
-        // CRITICAL: Send confirmation to desktop app that call analysis is truly active
-        try {
-          await fetch('/api/desktop-sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              type: 'web-app-call-started-confirmation',
-              timestamp: Date.now()
-            })
-          });
-          console.log('✅ Sent call started confirmation to desktop');
-        } catch (error) {
-          console.error('Error sending confirmation to desktop:', error);
-        }
-      };
+      // Wait for Ably connection
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Ably connection timeout'));
+        }, 10000);
 
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        setConnecting(false);
-        stopLive();
-        
-        toast({
-          variant: 'destructive',
-          title: 'Connection Error',
-          description: 'Failed to connect to audio processing server. Please try again.'
+        client.connection.on('connected', () => {
+          clearTimeout(timeout);
+          console.log('✅ ENHANCED LOGGING: Connected to Ably successfully');
+          resolve();
         });
-      };
 
-      ws.onmessage = (evt) => {
+        client.connection.on('failed', (error) => {
+          clearTimeout(timeout);
+          console.error('❌ ENHANCED LOGGING: Ably connection failed:', error);
+          reject(error);
+        });
+      });
+
+      // Set up channels
+      console.log('🔗 ENHANCED LOGGING: Setting up Ably channels...');
+      controlChannel.current = client.channels.get('closeflow:desktop-control');
+      resultsChannel.current = client.channels.get('closeflow:deepgram-results');
+
+      // Subscribe to Deepgram results
+      resultsChannel.current.subscribe((message) => {
+        console.log('📨 ENHANCED LOGGING: Received message from Ably:', message.name);
+        
         try {
-          const msg = JSON.parse(evt.data);
-          
-          if (msg.type === 'deepgram-result' && msg.data) {
-            const deepgramResult = msg.data;
+          if (message.name === 'deepgram-result' && message.data?.data) {
+            const deepgramResult = message.data.data;
             
             if (deepgramResult.type === 'Results' && deepgramResult.channel?.alternatives?.[0]?.transcript) {
               const transcript = deepgramResult.channel.alternatives[0].transcript;
@@ -582,28 +560,28 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
               
               handleTranscript(transcript, isFinal, speakerId);
             }
-          } else if (msg.type === 'deepgram-connected') {
-            console.log('✅ WebSocket server connected to Deepgram');
+          } else if (message.name === 'deepgram-connected') {
+            console.log('✅ ENHANCED LOGGING: Deepgram connected via Ably');
             setDeepgramConnected(true);
             
             toast({
               title: 'Transcription Ready',
-              description: 'Connected to Deepgram transcription service.'
+              description: 'Connected to Deepgram transcription service via Ably.'
             });
-          } else if (msg.type === 'deepgram-error') {
-            console.error('❌ Deepgram error via WebSocket:', msg.error);
+          } else if (message.name === 'deepgram-error') {
+            console.error('❌ ENHANCED LOGGING: Deepgram error via Ably:', message.data?.error);
             setDeepgramConnected(false);
             
             toast({
               variant: 'destructive',
               title: 'Transcription Error',
-              description: 'Failed to connect to transcription service: ' + msg.error
+              description: 'Failed to connect to transcription service: ' + message.data?.error
             });
-          } else if (msg.type === 'deepgram-disconnected') {
-            console.log('⚠️ Deepgram disconnected:', msg.closeCode, msg.closeReason);
+          } else if (message.name === 'deepgram-disconnected') {
+            console.log('⚠️ ENHANCED LOGGING: Deepgram disconnected via Ably:', message.data?.closeCode, message.data?.closeReason);
             setDeepgramConnected(false);
             
-            if (msg.closeCode === 1011) {
+            if (message.data?.closeCode === 1011) {
               toast({
                 variant: 'destructive',
                 title: 'Transcription Timeout',
@@ -612,45 +590,38 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
             }
           }
         } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
+          console.error('❌ ENHANCED LOGGING: Error processing Ably message:', error);
         }
-      };
+      });
 
-      ws.onclose = async () => {
-        console.log('WebSocket closed');
-        finalizeCurrentConversation();
-        setLive(false);
-        setConnecting(false);
-        setDeepgramConnected(false);
-        
-        // CRITICAL: Send confirmation to desktop app that call analysis has stopped
-        try {
-          await fetch('/api/desktop-sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              type: 'web-app-call-stopped-confirmation',
-              timestamp: Date.now()
-            })
-          });
-          console.log('✅ Sent call stopped confirmation to desktop');
-        } catch (error) {
-          console.error('Error sending stop confirmation to desktop:', error);
-        }
-        
-        // Signal to parent that desktop call is no longer active
-        if (onDesktopCallStateChange) {
-          onDesktopCallStateChange(false);
-        }
-        
-        // End call session in database and show feedback modal
-        if (currentCallId) {
-          endCallSession(currentCallId);
-          setShowFeedbackModal(true);
-        }
-      };
+      // Send start transcription command to desktop app
+      console.log('🔗 ENHANCED LOGGING: Sending start-transcription command via Ably...');
+      await controlChannel.current.publish('start-transcription', {
+        deepgramApiKey: deepgramApiKey,
+        timestamp: Date.now()
+      });
+
+      console.log('✅ ENHANCED LOGGING: Start transcription command sent via Ably');
+      
+      setLive(true);
+      setConnecting(false);
+      setMessages([]);
+      setInsights([]);
+      setCurrentConversation('');
+      setCurrentSpeaker(null);
+      conversationAccumulator.current = '';
+      lastSpeaker.current = null;
+      clearSilenceTimer();
+      clearLongSpeechTimer();
+      currentSegmentStartTime.current = 0;
+      
+      toast({
+        title: 'Call Analysis Started',
+        description: 'Connected to desktop app via Ably. Transcription is active.'
+      });
+
     } catch (err) {
-      console.error('Connection error:', err);
+      console.error('❌ ENHANCED LOGGING: Ably connection error:', err);
       setConnecting(false);
       stopLive();
       
@@ -663,7 +634,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
       toast({
         variant: 'destructive',
         title: 'Connection Error',
-        description: 'Failed to connect to audio processing server. Please try again.'
+        description: 'Failed to connect to desktop app via Ably. Please try again.'
       });
     }
   }
@@ -715,9 +686,9 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
         recorderRef.current = recorder;
 
         recorder.ondataavailable = (e) => {
-          if (e.data.size > 0 && socketRef.current?.readyState === WebSocket.OPEN) {
-            socketRef.current.send(e.data);
-          }
+          // Note: For Ably integration, audio data would need to be sent via Ably channels
+          // This is currently handled by the desktop app
+          console.log('🎤 Audio data available (handled by desktop app via Ably)');
         };
       } catch (err) {
         console.error('Failed to start recording:', err);
@@ -752,13 +723,25 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
       recorderRef.current = undefined;
     }
     
-    const ws = socketRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      // Tell WebSocket server to stop transcription
-      ws.send(JSON.stringify({ type: 'stop-transcription' }));
-      ws.close();
+    // Send stop transcription command via Ably
+    if (controlChannel.current) {
+      console.log('🛑 ENHANCED LOGGING: Sending stop-transcription command via Ably...');
+      controlChannel.current.publish('stop-transcription', {
+        timestamp: Date.now()
+      }).catch(error => {
+        console.error('Error sending stop command via Ably:', error);
+      });
     }
-    socketRef.current = undefined;
+    
+    // Close Ably connection
+    if (ablyClient.current) {
+      console.log('🛑 ENHANCED LOGGING: Closing Ably connection...');
+      ablyClient.current.close();
+      ablyClient.current = null;
+    }
+    
+    controlChannel.current = null;
+    resultsChannel.current = null;
     
     setLive(false);
     setConnecting(false);
