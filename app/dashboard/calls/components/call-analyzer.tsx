@@ -433,8 +433,18 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     console.log('🔗 ENHANCED LOGGING: Current state:', { live, connecting });
     
     const token = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
+    
+    // CRITICAL DEBUG: Log the token value to diagnose the issue
+    console.log('🔑 ENHANCED LOGGING: Deepgram API key check - Raw value:', token);
+    console.log('🔑 ENHANCED LOGGING: Deepgram API key check - Type:', typeof token);
+    console.log('🔑 ENHANCED LOGGING: Deepgram API key check - Length:', token?.length || 0);
+    console.log('🔑 ENHANCED LOGGING: Deepgram API key check - Is undefined:', token === undefined);
+    console.log('🔑 ENHANCED LOGGING: Deepgram API key check - Is empty string:', token === '');
+    console.log('🔑 ENHANCED LOGGING: Deepgram API key check - Truthy:', !!token);
+    
     if (!token) {
       console.log('❌ ENHANCED LOGGING: No Deepgram API key found');
+      console.log('❌ ENHANCED LOGGING: Environment variables available:', Object.keys(process.env).filter(key => key.includes('DEEPGRAM')));
       toast({
         variant: 'destructive',
         title: 'Configuration Error',
@@ -442,9 +452,6 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
       });
       return;
     }
-    
-    console.log('🔗 ENHANCED LOGGING: Deepgram API key check: Present');
-    console.log('🔗 ENHANCED LOGGING: API key length:', token.length);
 
     // Check authentication state before proceeding
     if (loading) {
@@ -501,10 +508,16 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
         currentSegmentStartTime.current = 0;
         
         // Send Deepgram API key to WebSocket server to start transcription
+        console.log('🔑 ENHANCED LOGGING: About to send API key to WebSocket server');
+        console.log('🔑 ENHANCED LOGGING: Token value being sent:', token);
+        console.log('🔑 ENHANCED LOGGING: Token length being sent:', token.length);
+        
         ws.send(JSON.stringify({
           type: 'start-transcription',
           deepgramApiKey: token
         }));
+        
+        console.log('🔑 ENHANCED LOGGING: API key sent to WebSocket server successfully');
         
         // CRITICAL: Send confirmation to desktop app that call analysis is truly active
         try {
