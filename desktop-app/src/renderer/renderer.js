@@ -77,6 +77,13 @@ class DesktopRenderer {
             this.updateConnectionStatus(status);
         });
 
+        // NEW: Listen for audio data for debug playback
+        ipcRenderer.on('audio-data-for-debug', (event, audioData) => {
+            if (this.audioPlaybackEnabled) {
+                this.processAudioChunk(audioData);
+            }
+        });
+
         // Button listeners
         this.startAnalysisBtn.addEventListener('click', () => {
             this.startCallAnalysis();
@@ -143,7 +150,6 @@ class DesktopRenderer {
             this.audioDebugStatus.textContent = 'Audio playback disabled';
             this.debugAudioPlayer.style.display = 'none';
             
-            // CRITICAL FIX: Properly stop and clear audio playback
             this.debugAudioPlayer.pause();
             this.debugAudioPlayer.src = '';
             
@@ -167,8 +173,9 @@ class DesktopRenderer {
             this.selectedDevices = status.selectedDevices;
             this.selectedSystemAudioSource = status.selectedSystemAudioSource;
             
-            // Update connection status
-            this.updateConnectionStatus(status.webAppConnected ? 'connected' : 'disconnected');
+            // Update connection status - check both web app and Ably
+            const connectionStatus = (status.webAppConnected && status.ablyConnected) ? 'connected' : 'disconnected';
+            this.updateConnectionStatus(connectionStatus);
             
         } catch (error) {
             console.error('Error loading initial data:', error);
@@ -231,7 +238,6 @@ class DesktopRenderer {
                 this.systemAudioDevice.appendChild(option);
             });
             
-            // Auto-select first source if none selected
             if (!this.selectedSystemAudioSource && this.systemAudioSources.length > 0) {
                 this.selectedSystemAudioSource = this.systemAudioSources[0].id;
                 this.systemAudioDevice.value = this.selectedSystemAudioSource;
@@ -250,7 +256,7 @@ class DesktopRenderer {
         
         switch (status) {
             case 'connected':
-                statusText.textContent = 'Connected to Web App';
+                statusText.textContent = 'Connected to Ably';
                 break;
             case 'disconnected':
                 statusText.textContent = 'Disconnected';
@@ -259,7 +265,6 @@ class DesktopRenderer {
                 statusText.textContent = 'Connecting...';
         }
         
-        // Update button states based on connection
         this.updateButtonStates();
     }
 
@@ -286,13 +291,9 @@ class DesktopRenderer {
     updateButtonStates() {
         const isConnected = this.connectionStatus.classList.contains('connected');
         
-        // Start button: enabled if zoom detected, not in call, connected, and not currently starting
         this.startAnalysisBtn.disabled = !this.zoomDetected || this.isCallActive || !isConnected || this.isStartingCall;
-        
-        // Stop button: enabled if in call and not currently stopping
         this.stopAnalysisBtn.disabled = !this.isCallActive || this.isStoppingCall;
         
-        // Update button text based on state
         if (this.isStartingCall) {
             this.startAnalysisBtn.innerHTML = `
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -334,10 +335,10 @@ class DesktopRenderer {
             this.analysisStatus.querySelector('p').textContent = 'Call analysis is active - check web app for real-time insights';
         } else if (this.isStartingCall) {
             this.analysisStatus.className = 'analysis-status';
-            this.analysisStatus.querySelector('p').textContent = 'Starting call analysis - waiting for web app confirmation...';
+            this.analysisStatus.querySelector('p').textContent = 'Starting call analysis via Ably...';
         } else if (this.isStoppingCall) {
             this.analysisStatus.className = 'analysis-status';
-            this.analysisStatus.querySelector('p').textContent = 'Stopping call analysis - waiting for web app confirmation...';
+            this.analysisStatus.querySelector('p').textContent = 'Stopping call analysis...';
         } else if (this.zoomDetected) {
             this.analysisStatus.className = 'analysis-status';
             this.analysisStatus.querySelector('p').textContent = 'Ready to start call analysis';
@@ -348,19 +349,16 @@ class DesktopRenderer {
     }
 
     updateAudioLevels(levels) {
-        // Update input level
         if (this.inputLevel && this.inputLevelText) {
             this.inputLevel.style.width = `${Math.min(levels.input, 100)}%`;
             this.inputLevelText.textContent = `${Math.round(levels.input)}%`;
         }
         
-        // Update output level
         if (this.outputLevel && this.outputLevelText) {
             this.outputLevel.style.width = `${Math.min(levels.output, 100)}%`;
             this.outputLevelText.textContent = `${Math.round(levels.output)}%`;
         }
 
-        // Update system audio level
         if (this.systemAudioLevel && this.systemAudioLevelText) {
             this.systemAudioLevel.style.width = `${Math.min(levels.systemAudio || 0, 100)}%`;
             this.systemAudioLevelText.textContent = `${Math.round(levels.systemAudio || 0)}%`;
@@ -385,10 +383,7 @@ class DesktopRenderer {
             
             const deviceName = this.getDeviceName('output', deviceId);
             
-            // Show success notification
             this.showNotification('Output Device Changed', `Selected: ${deviceName}`, 'success');
-            
-            // Show important system audio routing notification
             this.showSystemAudioRoutingNotification(deviceName);
             
         } catch (error) {
@@ -398,7 +393,6 @@ class DesktopRenderer {
     }
 
     showSystemAudioRoutingNotification(deviceName) {
-        // Create a special notification for system audio routing guidance
         const notification = document.createElement('div');
         notification.className = 'notification info system-audio-notification';
         notification.innerHTML = `
@@ -423,18 +417,15 @@ class DesktopRenderer {
             </div>
         `;
 
-        // Add click handler for opening system settings
         const openSettingsBtn = notification.querySelector('.notification-btn');
         if (openSettingsBtn) {
             openSettingsBtn.addEventListener('click', () => {
-                // Open macOS Sound settings
                 shell.openExternal('x-apple.systempreferences:com.apple.preference.sound');
             });
         }
 
         this.notifications.appendChild(notification);
 
-        // Auto-remove after 15 seconds (longer than normal due to importance)
         setTimeout(() => {
             if (notification.parentNode) {
                 notification.parentNode.removeChild(notification);
@@ -481,10 +472,6 @@ class DesktopRenderer {
                 throw new Error(result.message || 'Failed to start call analysis');
             }
             
-            // Note: We don't set isCallActive here - we wait for the main process to confirm
-            // via the zoom-status-changed event when it receives web app confirmation
-            
-            // Set up audio debug if enabled
             if (this.audioPlaybackEnabled) {
                 this.setupAudioDebug();
             }
@@ -512,10 +499,6 @@ class DesktopRenderer {
                 throw new Error(result.message || 'Failed to stop call analysis');
             }
             
-            // Note: We don't set isCallActive here - we wait for the main process to confirm
-            // via the zoom-status-changed event when it receives web app confirmation
-            
-            // Clean up audio debug
             this.cleanupAudioDebug();
             
         } catch (error) {
@@ -528,98 +511,49 @@ class DesktopRenderer {
     }
 
     setupAudioDebug() {
-        console.log('🎧 Setting up audio debug playback');
-        
-        // Reset audio chunks array
+        console.log('🎧 Setting up audio debug playback (Ably mode)');
         this.audioChunks = [];
-        
-        // Set up WebSocket for audio data
-        if (window.closeFlowWebSocket) {
-            // Add event listener for audio data
-            const originalSend = window.closeFlowWebSocket.send;
-            window.closeFlowWebSocket.send = (data) => {
-                // Call the original send method
-                originalSend.call(window.closeFlowWebSocket, data);
-                
-                // If it's binary data (audio) and playback is enabled, process it
-                if (data instanceof Blob && this.audioPlaybackEnabled) {
-                    this.processAudioChunk(data);
-                }
-            };
-            
-            console.log('🎧 Audio debug setup complete - WebSocket send method overridden');
-        } else {
-            console.log('⚠️ Cannot set up audio debug - WebSocket not found');
-        }
     }
     
     processAudioChunk(chunk) {
         console.log('🎧 ENHANCED LOGGING: Processing audio chunk for playback');
-        console.log('🎧 ENHANCED LOGGING: Chunk size:', chunk.size);
-        console.log('🎧 ENHANCED LOGGING: Chunk type:', chunk.type);
         
-        // CRITICAL FIX: Get the actual MIME type from the MediaRecorder
-        let actualMimeType = 'audio/webm;codecs=opus'; // Default fallback
+        let actualMimeType = 'audio/webm;codecs=opus';
         
         if (window.closeFlowActualMimeType) {
             actualMimeType = window.closeFlowActualMimeType;
-            console.log('🎧 ENHANCED LOGGING: Using actual MIME type from MediaRecorder:', actualMimeType);
-        } else {
-            console.log('🎧 ENHANCED LOGGING: Using fallback MIME type:', actualMimeType);
+            console.log('🎧 ENHANCED LOGGING: Using actual MIME type:', actualMimeType);
         }
         
-        // Add the chunk to our array
         this.audioChunks.push(chunk);
         
-        // Keep only the last 5 chunks to avoid memory issues and reduce latency
         if (this.audioChunks.length > 5) {
             this.audioChunks.shift();
-            console.log('🎧 ENHANCED LOGGING: Trimmed audio chunks to maintain buffer size');
         }
         
-        // CRITICAL FIX: Create a new blob with the correct MIME type
         const audioBlob = new Blob(this.audioChunks, { type: actualMimeType });
-        console.log('🎧 ENHANCED LOGGING: Created audio blob with MIME type:', actualMimeType);
-        console.log('🎧 ENHANCED LOGGING: Audio blob size:', audioBlob.size);
-        
-        // Create a URL for the blob
         const audioUrl = URL.createObjectURL(audioBlob);
-        console.log('🎧 ENHANCED LOGGING: Created audio URL:', audioUrl);
         
-        // Set the audio player source
         this.debugAudioPlayer.src = audioUrl;
         
-        // CRITICAL FIX: Explicitly call play() with error handling and logging
         this.debugAudioPlayer.play().then(() => {
             console.log('🎧 ENHANCED LOGGING: Audio playback started successfully');
         }).catch(error => {
             console.log('🎧 ENHANCED LOGGING: Audio play failed:', error.name, '-', error.message);
-            console.log('🎧 ENHANCED LOGGING: This is normal for some chunks, especially at the beginning');
         });
         
-        // Clean up old URLs to avoid memory leaks
         setTimeout(() => {
             URL.revokeObjectURL(audioUrl);
-            console.log('🎧 ENHANCED LOGGING: Cleaned up audio URL');
-        }, 3000); // Reduced cleanup time for better memory management
+        }, 3000);
     }
     
     cleanupAudioDebug() {
         console.log('🧹 Cleaning up audio debug');
-        
-        // Reset audio chunks
         this.audioChunks = [];
         
-        // Reset audio player
         if (this.debugAudioPlayer) {
             this.debugAudioPlayer.pause();
             this.debugAudioPlayer.src = '';
-        }
-        
-        // Reset WebSocket send method if it was overridden
-        if (window.closeFlowWebSocket && window.closeFlowWebSocket._originalSend) {
-            window.closeFlowWebSocket.send = window.closeFlowWebSocket._originalSend;
-            delete window.closeFlowWebSocket._originalSend;
         }
     }
 
@@ -633,14 +567,12 @@ class DesktopRenderer {
 
         this.notifications.appendChild(notification);
 
-        // Auto-remove after 5 seconds
         setTimeout(() => {
             if (notification.parentNode) {
                 notification.parentNode.removeChild(notification);
             }
         }, 5000);
 
-        // Remove on click
         notification.addEventListener('click', () => {
             if (notification.parentNode) {
                 notification.parentNode.removeChild(notification);
@@ -653,7 +585,6 @@ class DesktopRenderer {
     }
 }
 
-// Initialize the renderer when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     new DesktopRenderer();
 });

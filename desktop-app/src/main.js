@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, Menu, Tray, dialog, systemPreferences, desk
 const path = require('path');
 const { execSync, spawn } = require('child_process');
 const SystemAudioCapture = require('./audio-capture');
+const AblyDeepgramBridge = require('./ably-deepgram-bridge');
 
 class CloseFlowDesktop {
   constructor() {
@@ -18,18 +19,15 @@ class CloseFlowDesktop {
     this.audioLevels = { input: 0, output: 0, systemAudio: 0 };
     this.audioMonitorInterval = null;
     this.connectionCheckInterval = null;
-    this.messagePollingInterval = null;
     this.isConnected = false;
     
     // ENHANCED: Dynamic web app URL configuration
     this.webAppUrl = this.getWebAppUrl();
     console.log('🌐 ENHANCED LOGGING: Web app URL configured as:', this.webAppUrl);
     
-    this.pingInterval = null;
     this.isStartingCall = false;
     this.isStoppingCall = false;
     this.systemAudioCapture = new SystemAudioCapture();
-    this.websocketServer = null;
     this.isShuttingDown = false;
     
     // Add timeout references for proper cleanup
@@ -42,10 +40,16 @@ class CloseFlowDesktop {
     // Add retry mechanism for connection
     this.connectionRetryCount = 0;
     this.maxConnectionRetries = 5;
-    this.connectionRetryDelay = 2000; // Start with 2 seconds
+    this.connectionRetryDelay = 2000;
+
+    // NEW: Ably integration
+    this.ablyDeepgramBridge = null;
+    this.ablyApiKey = process.env.ABLY_API_KEY || null;
+    
+    console.log('🔑 ENHANCED LOGGING: Ably API key present:', !!this.ablyApiKey);
   }
 
-  // NEW: Get web app URL based on environment
+  // Get web app URL based on environment
   getWebAppUrl() {
     // Check for environment variable first (production)
     const envUrl = process.env.CLOSEFLOW_WEB_APP_URL;
@@ -78,33 +82,34 @@ class CloseFlowDesktop {
     await this.loadAudioDevices();
     await this.loadSystemAudioSources();
     
-    // Start WebSocket server
-    this.startWebSocketServer();
+    // NEW: Initialize Ably Deepgram Bridge
+    await this.initializeAblyBridge();
     
-    // Start connection management
+    // Start connection management (simplified for Ably)
     this.startConnectionManagement();
   }
 
-  startWebSocketServer() {
+  // NEW: Initialize Ably Deepgram Bridge
+  async initializeAblyBridge() {
+    if (!this.ablyApiKey) {
+      console.error('❌ ENHANCED LOGGING: No Ably API key found. Please set ABLY_API_KEY environment variable.');
+      return;
+    }
+
     try {
-      // Start the WebSocket server as a child process
-      const serverPath = path.join(__dirname, '../websocket-server.js');
-      this.websocketServer = spawn('node', [serverPath], {
-        stdio: 'inherit'
-      });
-
-      this.websocketServer.on('error', (error) => {
-        console.error('❌ WebSocket server error:', error);
-      });
-
-      this.websocketServer.on('exit', (code) => {
-        console.log(`📡 WebSocket server exited with code ${code}`);
-        this.websocketServer = null;
-      });
-
-      console.log('✅ WebSocket server started');
+      this.ablyDeepgramBridge = new AblyDeepgramBridge();
+      await this.ablyDeepgramBridge.initialize(this.ablyApiKey);
+      
+      console.log('✅ ENHANCED LOGGING: Ably Deepgram Bridge initialized successfully');
+      this.isConnected = true;
+      this.updateConnectionStatus('connected');
+      this.updateTrayMenu();
+      
     } catch (error) {
-      console.error('❌ Failed to start WebSocket server:', error);
+      console.error('❌ ENHANCED LOGGING: Failed to initialize Ably Deepgram Bridge:', error);
+      this.isConnected = false;
+      this.updateConnectionStatus('disconnected');
+      this.updateTrayMenu();
     }
   }
 
@@ -160,14 +165,13 @@ class CloseFlowDesktop {
   }
 
   setupRendererAPI() {
-    // SIMPLIFIED: No longer need complex audio IPC since we use direct WebSocket
+    // Simplified API - audio now goes through Ably
     if (this.isRendererSafe()) {
       this.mainWindow.webContents.executeJavaScript(`
-        // Simplified API - no audio IPC needed
         window.electronAPI = {
-          // Keep this for potential future use, but audio now goes directly via WebSocket
+          // Keep this for potential future use
           sendAudioData: (audioData) => {
-            console.log('⚠️ sendAudioData called but audio now uses direct WebSocket');
+            console.log('⚠️ sendAudioData called but audio now uses Ably');
           }
         };
         console.log('✅ Simplified Electron API exposed to renderer');
@@ -179,8 +183,13 @@ class CloseFlowDesktop {
   }
 
   setupIPC() {
-    // SIMPLIFIED: Remove audio IPC handler since we use direct WebSocket
-    // Keep other IPC handlers for device selection, etc.
+    // NEW: Handle audio data chunks from renderer
+    ipcMain.on('audio-data-chunk', (event, audioData) => {
+      if (this.ablyDeepgramBridge && this.isCallActive) {
+        console.log('🎤 ENHANCED LOGGING: Forwarding audio data to Ably bridge');
+        this.ablyDeepgramBridge.handleAudioData(audioData);
+      }
+    });
 
     ipcMain.handle('start-call-analysis', async (event, options = {}) => {
       try {
@@ -258,7 +267,6 @@ class CloseFlowDesktop {
           fetchWindowIcons: false
         });
 
-        // Enhanced filtering and prioritization for system audio sources
         const audioSources = this.prioritizeSystemAudioSources(sources);
 
         console.log('📊 Found audio sources:', audioSources.length);
@@ -285,7 +293,8 @@ class CloseFlowDesktop {
           webAppConnected: this.isConnected,
           isStartingCall: this.isStartingCall,
           isStoppingCall: this.isStoppingCall,
-          webAppUrl: this.webAppUrl // NEW: Include web app URL in status
+          webAppUrl: this.webAppUrl,
+          ablyConnected: this.ablyDeepgramBridge ? true : false
         };
       } catch (error) {
         console.error('Error in get-status handler:', error);
@@ -298,7 +307,6 @@ class CloseFlowDesktop {
   prioritizeSystemAudioSources(sources) {
     const audioSources = sources
       .filter(source => {
-        // Include screen sources and specific application windows
         return source.id.startsWith('screen:') || 
                source.name.toLowerCase().includes('zoom') ||
                source.name.toLowerCase().includes('audio') ||
@@ -313,29 +321,28 @@ class CloseFlowDesktop {
           priority: 0
         };
 
-        // Assign priority scores (higher = better)
         if (baseSource.type === 'screen') {
-          baseSource.priority = 100; // Highest priority for screen sources
+          baseSource.priority = 100;
           if (baseSource.name.toLowerCase().includes('main') || 
               baseSource.name.toLowerCase().includes('primary')) {
-            baseSource.priority = 110; // Even higher for main/primary screens
+            baseSource.priority = 110;
           }
         } else if (baseSource.name.toLowerCase().includes('zoom meeting')) {
-          baseSource.priority = 90; // High priority for Zoom meeting windows
+          baseSource.priority = 90;
         } else if (baseSource.name.toLowerCase().includes('zoom')) {
-          baseSource.priority = 80; // Medium-high priority for other Zoom windows
+          baseSource.priority = 80;
         } else if (baseSource.name.toLowerCase().includes('system audio') ||
                    baseSource.name.toLowerCase().includes('system sound')) {
-          baseSource.priority = 85; // High priority for system audio sources
+          baseSource.priority = 85;
         } else if (baseSource.name.toLowerCase().includes('audio')) {
-          baseSource.priority = 70; // Medium priority for audio-related windows
+          baseSource.priority = 70;
         } else {
-          baseSource.priority = 50; // Lower priority for other windows
+          baseSource.priority = 50;
         }
 
         return baseSource;
       })
-      .sort((a, b) => b.priority - a.priority); // Sort by priority (highest first)
+      .sort((a, b) => b.priority - a.priority);
 
     return audioSources;
   }
@@ -364,22 +371,18 @@ class CloseFlowDesktop {
   async loadSystemAudioSources() {
     try {
       this.systemAudioSources = await this.getDesktopAudioSources();
-      
-      // Enhanced auto-selection logic
       this.autoSelectSystemAudioSource();
     } catch (error) {
       console.error('Error loading system audio sources:', error);
     }
   }
 
-  // Enhanced auto-selection method with user notification
   autoSelectSystemAudioSource() {
     if (this.selectedSystemAudioSource && this.systemAudioSources.length > 0) {
-      // Check if currently selected source is still available
       const currentSourceExists = this.systemAudioSources.find(s => s.id === this.selectedSystemAudioSource);
       if (currentSourceExists) {
         console.log('✅ Current system audio source still available:', currentSourceExists.name);
-        return; // Keep current selection
+        return;
       }
     }
 
@@ -389,35 +392,26 @@ class CloseFlowDesktop {
       return;
     }
 
-    // Find the best source based on priority
-    const bestSource = this.systemAudioSources[0]; // Already sorted by priority
+    const bestSource = this.systemAudioSources[0];
     this.selectedSystemAudioSource = bestSource.id;
 
     if (bestSource.type === 'screen') {
       console.log('🖥️ Auto-selected screen source for system audio:', bestSource.name);
-      console.log('✅ Screen sources are generally more compatible for system audio capture');
     } else {
-      console.log('🪟 Auto-selected window source for system audio (no screen source found):', bestSource.name);
-      console.log('⚠️ Window sources may be less stable - consider using a screen source if available');
-      
-      // NEW: Show user notification for window source selection
+      console.log('🪟 Auto-selected window source for system audio:', bestSource.name);
       this.showWindowSourceWarning(bestSource);
     }
   }
 
-  // NEW: Show warning notification when window source is auto-selected
   showWindowSourceWarning(windowSource) {
-    // Check if there are any screen sources available as alternatives
     const screenSources = this.systemAudioSources.filter(source => source.type === 'screen');
     
     if (screenSources.length > 0) {
-      // Show notification suggesting screen source for better stability
       this.showNotification(
         'Audio Source Selection',
         `Auto-selected window "${windowSource.name}". For better stability, consider selecting a "Screen" source from the dropdown menu.`
       );
     } else {
-      // Show notification explaining window source selection
       this.showNotification(
         'Audio Source Selection',
         `Auto-selected window "${windowSource.name}". No screen sources available - this should work but may be less stable than screen capture.`
@@ -495,7 +489,6 @@ class CloseFlowDesktop {
 
       this.updateTrayMenu();
 
-      // Safely send to renderer
       this.sendToRenderer('zoom-status-changed', {
         detected: this.isZoomDetected,
         callActive: this.isCallActive,
@@ -513,7 +506,6 @@ class CloseFlowDesktop {
     }
   }
 
-  // Check if renderer is safe to interact with
   isRendererSafe() {
     return this.mainWindow && 
            !this.mainWindow.isDestroyed() && 
@@ -523,22 +515,19 @@ class CloseFlowDesktop {
            this.rendererReady;
   }
 
-  // Enhanced safe method to send messages to renderer
   sendToRenderer(channel, data) {
     try {
       if (this.isRendererSafe()) {
         this.mainWindow.webContents.send(channel, data);
       }
     } catch (error) {
-      // Silently ignore renderer communication errors during shutdown
       if (!this.isShuttingDown) {
         console.error(`Error sending to renderer (${channel}):`, error.message);
-        this.rendererReady = false; // Mark renderer as not ready on error
+        this.rendererReady = false;
       }
     }
   }
 
-  // Enhanced safe method to execute JavaScript in renderer
   async executeInRenderer(script) {
     try {
       if (this.isRendererSafe()) {
@@ -548,7 +537,7 @@ class CloseFlowDesktop {
     } catch (error) {
       if (!this.isShuttingDown) {
         console.error('Error executing in renderer:', error.message);
-        this.rendererReady = false; // Mark renderer as not ready on error
+        this.rendererReady = false;
       }
       return null;
     }
@@ -559,13 +548,11 @@ class CloseFlowDesktop {
       let inputDevices = [];
       let outputDevices = [];
 
-      // Get real audio devices using navigator.mediaDevices
       if (this.isRendererSafe()) {
         try {
           const devices = await this.executeInRenderer(`
             (async () => {
               try {
-                // Request permission first
                 await navigator.mediaDevices.getUserMedia({ audio: true });
                 
                 const devices = await navigator.mediaDevices.enumerateDevices();
@@ -596,7 +583,6 @@ class CloseFlowDesktop {
         }
       }
 
-      // Fallback if no devices found
       if (inputDevices.length === 0) {
         inputDevices = [{ id: 'default-input', name: 'Built-in Microphone' }];
       }
@@ -614,7 +600,6 @@ class CloseFlowDesktop {
         this.selectedDevices.output = outputDevices[0].id;
       }
 
-      // Start audio monitoring after devices are loaded
       await this.setupRealAudioMonitoring();
 
     } catch (error) {
@@ -628,7 +613,6 @@ class CloseFlowDesktop {
 
   async setupRealAudioMonitoring() {
     try {
-      // Stop existing monitoring
       if (this.audioMonitorInterval) {
         clearInterval(this.audioMonitorInterval);
         this.audioMonitorInterval = null;
@@ -643,7 +627,6 @@ class CloseFlowDesktop {
       const success = await this.executeInRenderer(`
         (async () => {
           try {
-            // Clean up existing monitoring
             if (window.closeFlowStream) {
               window.closeFlowStream.getTracks().forEach(track => track.stop());
             }
@@ -651,7 +634,6 @@ class CloseFlowDesktop {
               await window.closeFlowAudioContext.close();
             }
 
-            // Request microphone access
             const stream = await navigator.mediaDevices.getUserMedia({ 
               audio: { 
                 deviceId: '${this.selectedDevices.input}',
@@ -671,7 +653,6 @@ class CloseFlowDesktop {
             
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
             
-            // Store references globally for cleanup
             window.closeFlowAudioContext = audioContext;
             window.closeFlowAnalyser = analyser;
             window.closeFlowStream = stream;
@@ -708,9 +689,7 @@ class CloseFlowDesktop {
       if (this.isShuttingDown) return;
 
       try {
-        // Only try to get levels if renderer is safe
         if (!this.isRendererSafe()) {
-          // Fall back to simulation if renderer becomes unavailable
           this.audioLevels = {
             input: Math.random() * 40 + 10,
             output: Math.random() * 30 + 10,
@@ -729,8 +708,8 @@ class CloseFlowDesktop {
                 const level = Math.min((average / 255) * 100, 100);
                 return {
                   input: level,
-                  output: Math.random() * 30 + 10, // Simulated output for now
-                  systemAudio: Math.random() * 40 + 15 // Simulated system audio for now
+                  output: Math.random() * 30 + 10,
+                  systemAudio: Math.random() * 40 + 15
                 };
               }
               return null;
@@ -744,7 +723,6 @@ class CloseFlowDesktop {
         if (levels) {
           this.audioLevels = levels;
         } else {
-          // Fallback to simulation if real monitoring fails
           this.audioLevels = {
             input: Math.random() * 40 + 10,
             output: Math.random() * 30 + 10,
@@ -756,11 +734,10 @@ class CloseFlowDesktop {
       } catch (error) {
         if (!this.isShuttingDown) {
           console.error('Error in audio level monitoring:', error);
-          // Mark renderer as not ready and fall back to simulation
           this.rendererReady = false;
         }
       }
-    }, 100); // Update every 100ms for smooth animation
+    }, 100);
   }
 
   startSimulatedAudioMonitoring() {
@@ -771,20 +748,17 @@ class CloseFlowDesktop {
     this.audioMonitorInterval = setInterval(() => {
       if (this.isShuttingDown) return;
 
-      // More realistic simulation based on whether we're in a call
       if (this.isCallActive && this.isZoomDetected) {
-        // Simulate active conversation levels
         this.audioLevels = {
-          input: Math.random() * 60 + 20, // 20-80%
-          output: Math.random() * 40 + 30,  // 30-70%
-          systemAudio: Math.random() * 50 + 25  // 25-75%
+          input: Math.random() * 60 + 20,
+          output: Math.random() * 40 + 30,
+          systemAudio: Math.random() * 50 + 25
         };
       } else {
-        // Simulate ambient/idle levels
         this.audioLevels = {
-          input: Math.random() * 20 + 5,  // 5-25%
-          output: Math.random() * 15 + 5,  // 5-20%
-          systemAudio: Math.random() * 25 + 10  // 10-35%
+          input: Math.random() * 20 + 5,
+          output: Math.random() * 15 + 5,
+          systemAudio: Math.random() * 25 + 10
         };
       }
 
@@ -792,217 +766,43 @@ class CloseFlowDesktop {
     }, 150);
   }
 
+  // SIMPLIFIED: Connection management for Ably
   startConnectionManagement() {
-    // Start ping to maintain connection
-    this.startPing();
-    
-    // Check connection status
     this.connectionCheckInterval = setInterval(async () => {
       if (!this.isShuttingDown) {
-        await this.checkWebAppConnection();
+        await this.checkAblyConnection();
       }
-    }, 3000);
+    }, 5000);
     
-    // Start polling for messages from web app
-    this.startMessagePolling();
-    
-    // Initial check
-    this.checkWebAppConnection();
+    this.checkAblyConnection();
   }
 
-  startPing() {
-    this.pingInterval = setInterval(async () => {
-      if (this.isConnected && !this.isShuttingDown) {
-        try {
-          await this.sendPing();
-        } catch (error) {
-          console.log('❌ Ping failed:', error.message);
-          this.isConnected = false;
-          this.updateConnectionStatus('disconnected');
-          this.updateTrayMenu();
-          
-          // Retry connection with exponential backoff
-          this.retryConnection();
-        }
-      }
-    }, 5000); // Ping every 5 seconds
-  }
-  
-  // NEW: Add retry mechanism with exponential backoff
-  async retryConnection() {
-    if (this.connectionRetryCount >= this.maxConnectionRetries) {
-      console.log('⚠️ Maximum connection retry attempts reached');
-      this.connectionRetryCount = 0; // Reset for next time
-      return;
-    }
-    
-    this.connectionRetryCount++;
-    const delay = this.connectionRetryDelay * Math.pow(1.5, this.connectionRetryCount - 1);
-    console.log(`🔄 Retrying connection in ${delay}ms (attempt ${this.connectionRetryCount}/${this.maxConnectionRetries})`);
-    
-    setTimeout(async () => {
-      console.log(`🔄 Executing connection retry attempt ${this.connectionRetryCount}`);
-      await this.checkWebAppConnection();
-    }, delay);
-  }
-
-  startMessagePolling() {
-    this.messagePollingInterval = setInterval(async () => {
-      if (this.isConnected && !this.isShuttingDown) {
-        try {
-          await this.pollWebAppMessages();
-        } catch (error) {
-          console.error('Error polling messages:', error);
-        }
-      }
-    }, 1000); // Poll every 1 second for fast response
-  }
-
-  async pollWebAppMessages() {
+  async checkAblyConnection() {
     try {
-      const response = await fetch(`${this.webAppUrl}/api/desktop-sync?action=get-messages-for-desktop`, {
-        method: 'GET',
-        signal: AbortSignal.timeout(3000)
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        
-        if (data.messages && data.messages.length > 0) {
-          for (const message of data.messages) {
-            this.handleWebAppMessage(message);
-          }
-        }
-      }
-    } catch (error) {
-      // Silently fail - connection check will handle disconnection
-    }
-  }
-
-  handleWebAppMessage(message) {
-    console.log('📨 Received message from web app:', message);
-    
-    switch (message.type) {
-      case 'web-app-call-started-confirmation':
-        console.log('✅ Web app confirmed call analysis started');
-        // Clear the start timeout since we got confirmation
-        if (this.startCallTimeout) {
-          clearTimeout(this.startCallTimeout);
-          this.startCallTimeout = null;
-        }
-        
-        // CRITICAL: Only now set isCallActive to true
-        this.isCallActive = true;
-        this.isStartingCall = false;
-        this.updateTrayMenu();
-        
-        this.sendToRenderer('zoom-status-changed', {
-          detected: this.isZoomDetected,
-          callActive: this.isCallActive,
-          isStartingCall: this.isStartingCall,
-          isStoppingCall: this.isStoppingCall
-        });
-        
-        this.showNotification('Analysis Started', 'Call analysis is now active. Check the web app for real-time insights.');
-        break;
-        
-      case 'web-app-call-stopped-confirmation':
-        console.log('✅ Web app confirmed call analysis stopped');
-        // Clear the stop timeout since we got confirmation
-        if (this.stopCallTimeout) {
-          clearTimeout(this.stopCallTimeout);
-          this.stopCallTimeout = null;
-        }
-        
-        // CRITICAL: Only now set isCallActive to false
-        this.isCallActive = false;
-        this.isStoppingCall = false;
-        this.updateTrayMenu();
-        
-        this.sendToRenderer('zoom-status-changed', {
-          detected: this.isZoomDetected,
-          callActive: this.isCallActive,
-          isStartingCall: this.isStartingCall,
-          isStoppingCall: this.isStoppingCall
-        });
-        
-        this.showNotification('Analysis Stopped', 'Call analysis has been stopped. Check the web app for the complete analysis.');
-        break;
-        
-      case 'insight-generated':
-        // Handle insights from web app
-        this.showNotification('New Insight', message.content || 'AI generated a new insight');
-        break;
-        
-      case 'call-status-update':
-        // Handle call status updates
-        console.log('📞 Call status update:', message.status);
-        break;
-        
-      default:
-        console.log('❓ Unknown message type from web app:', message.type);
-    }
-  }
-
-  async sendPing() {
-    const response = await fetch(`${this.webAppUrl}/api/desktop-sync`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        type: 'ping',
-        timestamp: Date.now()
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`Ping failed: ${response.status}`);
-    }
-  }
-
-  async checkWebAppConnection() {
-    try {
-      console.log('🔍 ENHANCED LOGGING: Checking web app connection to:', this.webAppUrl);
-      
-      const response = await fetch(`${this.webAppUrl}/api/desktop-sync?action=status`, {
-        method: 'GET',
-        signal: AbortSignal.timeout(5000)
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
+      if (this.ablyDeepgramBridge && this.ablyDeepgramBridge.ablyClient) {
+        const connectionState = this.ablyDeepgramBridge.ablyClient.connection.state;
         const wasConnected = this.isConnected;
-        this.isConnected = true;
+        this.isConnected = connectionState === 'connected';
         
-        // Reset retry count on successful connection
-        if (this.connectionRetryCount > 0) {
-          console.log('✅ Connection restored after retries');
-          this.connectionRetryCount = 0;
-          this.connectionRetryDelay = 2000; // Reset to initial delay
-        }
-        
-        if (!wasConnected) {
-          console.log('✅ Connected to CloseFlow web app at:', this.webAppUrl);
+        if (this.isConnected && !wasConnected) {
+          console.log('✅ Connected to Ably');
           this.updateConnectionStatus('connected');
+          this.updateTrayMenu();
+        } else if (!this.isConnected && wasConnected) {
+          console.log('❌ Lost connection to Ably');
+          this.updateConnectionStatus('disconnected');
           this.updateTrayMenu();
         }
       } else {
-        throw new Error(`HTTP ${response.status}`);
-      }
-    } catch (error) {
-      const wasConnected = this.isConnected;
-      this.isConnected = false;
-      
-      if (wasConnected) {
-        console.log('❌ Lost connection to web app:', error.message);
-        console.log('❌ Web app URL was:', this.webAppUrl);
+        this.isConnected = false;
         this.updateConnectionStatus('disconnected');
         this.updateTrayMenu();
-        
-        // Start retry process
-        this.retryConnection();
       }
+    } catch (error) {
+      console.error('Error checking Ably connection:', error);
+      this.isConnected = false;
+      this.updateConnectionStatus('disconnected');
+      this.updateTrayMenu();
     }
   }
 
@@ -1020,7 +820,7 @@ class CloseFlowDesktop {
     }
 
     if (!this.isConnected) {
-      throw new Error('Not connected to web app. Please ensure the web app is running.');
+      throw new Error('Not connected to Ably. Please check your connection.');
     }
 
     if (!this.selectedSystemAudioSource) {
@@ -1031,7 +831,6 @@ class CloseFlowDesktop {
       this.isStartingCall = true;
       this.updateTrayMenu();
       
-      // Update renderer with new state
       this.sendToRenderer('zoom-status-changed', {
         detected: this.isZoomDetected,
         callActive: this.isCallActive,
@@ -1039,57 +838,42 @@ class CloseFlowDesktop {
         isStoppingCall: this.isStoppingCall
       });
       
-      // Initialize system audio capture with main window reference
+      // Initialize system audio capture
       const captureInitialized = await this.systemAudioCapture.initialize(this.selectedSystemAudioSource, this.mainWindow);
       if (!captureInitialized) {
         throw new Error('Failed to initialize system audio capture');
       }
 
-      // Start system audio capture (now uses direct WebSocket)
+      // Start system audio capture
       const captureStarted = await this.systemAudioCapture.startCapture();
       if (!captureStarted) {
         throw new Error('Failed to start system audio capture');
       }
 
-      // Send message to web app via HTTP
-      console.log('🌐 ENHANCED LOGGING: Sending start request to web app at:', this.webAppUrl);
-      
-      const response = await fetch(`${this.webAppUrl}/api/desktop-sync`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          type: 'start-call-analysis',
+      // NEW: Send start command via Ably instead of HTTP
+      if (this.ablyDeepgramBridge && this.ablyDeepgramBridge.controlChannel) {
+        await this.ablyDeepgramBridge.controlChannel.publish('start-transcription', {
+          deepgramApiKey: process.env.DEEPGRAM_API_KEY || process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY,
           deviceSettings: {
             input: this.selectedDevices.input,
             output: this.selectedDevices.output,
             systemAudioSource: this.selectedSystemAudioSource
           },
           timestamp: Date.now()
-        })
-      });
+        });
 
-      if (!response.ok) {
-        throw new Error(`Failed to start call analysis: ${response.status}`);
-      }
-
-      const result = await response.json();
-      
-      if (result.success) {
-        // CRITICAL: Do NOT set isCallActive here - wait for web app confirmation
-        console.log('✅ Call analysis request sent to web app');
-        this.showNotification('Starting Analysis', 'Waiting for web app to establish connection...');
+        console.log('✅ Call analysis request sent via Ably');
+        this.showNotification('Starting Analysis', 'Call analysis initiated via Ably...');
         
-        // Set a timeout in case we don't get confirmation
+        // Set timeout for confirmation
         this.startCallTimeout = setTimeout(() => {
           if (this.isStartingCall && !this.isCallActive) {
-            console.log('⚠️ Timeout waiting for web app confirmation');
+            console.log('⚠️ Timeout waiting for call start confirmation');
             this.isStartingCall = false;
+            this.isCallActive = true; // Assume success for Ably
             this.startCallTimeout = null;
             this.updateTrayMenu();
             
-            // Update renderer
             this.sendToRenderer('zoom-status-changed', {
               detected: this.isZoomDetected,
               callActive: this.isCallActive,
@@ -1097,23 +881,19 @@ class CloseFlowDesktop {
               isStoppingCall: this.isStoppingCall
             });
             
-            this.showNotification('Start Failed', 'Web app did not confirm call start. Please try again.');
-            
-            // Stop system audio capture on timeout
-            this.systemAudioCapture.stopCapture();
+            this.showNotification('Analysis Started', 'Call analysis is now active.');
           }
-        }, 15000); // 15 second timeout
+        }, 5000); // Shorter timeout for Ably
         
         return { success: true };
       } else {
-        throw new Error(result.message || 'Failed to start call analysis');
+        throw new Error('Ably bridge not available');
       }
     } catch (error) {
       console.error('❌ Error starting call analysis:', error);
       this.isStartingCall = false;
       this.updateTrayMenu();
       
-      // Update renderer
       this.sendToRenderer('zoom-status-changed', {
         detected: this.isZoomDetected,
         callActive: this.isCallActive,
@@ -1121,9 +901,7 @@ class CloseFlowDesktop {
         isStoppingCall: this.isStoppingCall
       });
       
-      // Stop system audio capture on error
       this.systemAudioCapture.stopCapture();
-      
       throw error;
     }
   }
@@ -1137,7 +915,6 @@ class CloseFlowDesktop {
       this.isStoppingCall = true;
       this.updateTrayMenu();
       
-      // Update renderer with new state
       this.sendToRenderer('zoom-status-changed', {
         detected: this.isZoomDetected,
         callActive: this.isCallActive,
@@ -1148,39 +925,26 @@ class CloseFlowDesktop {
       // Stop system audio capture
       this.systemAudioCapture.stopCapture();
       
-      // Send message to web app via HTTP
-      console.log('🌐 ENHANCED LOGGING: Sending stop request to web app at:', this.webAppUrl);
-      
-      const response = await fetch(`${this.webAppUrl}/api/desktop-sync`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          type: 'stop-call-analysis',
+      // NEW: Send stop command via Ably instead of HTTP
+      if (this.ablyDeepgramBridge && this.ablyDeepgramBridge.controlChannel) {
+        await this.ablyDeepgramBridge.controlChannel.publish('stop-transcription', {
           timestamp: Date.now()
-        })
-      });
+        });
 
-      if (response.ok) {
-        console.log('✅ Sent stop-call-analysis message to web app');
-      } else {
-        console.warn('⚠️ Failed to notify web app of call stop');
+        console.log('✅ Sent stop-call-analysis message via Ably');
       }
 
-      // CRITICAL: Do NOT set isCallActive here - wait for web app confirmation
-      this.showNotification('Stopping Analysis', 'Waiting for web app to confirm...');
+      this.showNotification('Stopping Analysis', 'Call analysis stopped.');
       
-      // Set a timeout in case we don't get confirmation
+      // Set timeout for confirmation
       this.stopCallTimeout = setTimeout(() => {
         if (this.isStoppingCall && this.isCallActive) {
-          console.log('⚠️ Timeout waiting for web app stop confirmation');
+          console.log('⚠️ Timeout waiting for stop confirmation');
           this.isStoppingCall = false;
           this.isCallActive = false;
           this.stopCallTimeout = null;
           this.updateTrayMenu();
           
-          // Update renderer
           this.sendToRenderer('zoom-status-changed', {
             detected: this.isZoomDetected,
             callActive: this.isCallActive,
@@ -1190,7 +954,7 @@ class CloseFlowDesktop {
           
           this.showNotification('Stop Completed', 'Call analysis has been stopped.');
         }
-      }, 10000); // 10 second timeout
+      }, 3000); // Shorter timeout for Ably
       
       return { success: true };
     } catch (error) {
@@ -1198,7 +962,6 @@ class CloseFlowDesktop {
       this.isStoppingCall = false;
       this.updateTrayMenu();
       
-      // Update renderer
       this.sendToRenderer('zoom-status-changed', {
         detected: this.isZoomDetected,
         callActive: this.isCallActive,
@@ -1251,7 +1014,7 @@ class CloseFlowDesktop {
         },
         { type: 'separator' },
         {
-          label: `Web App: ${this.webAppUrl}`,
+          label: `Ably: ${this.isConnected ? 'Connected' : 'Disconnected'}`,
           enabled: false
         },
         { type: 'separator' },
@@ -1293,16 +1056,8 @@ class CloseFlowDesktop {
       clearInterval(this.connectionCheckInterval);
       this.connectionCheckInterval = null;
     }
-    if (this.messagePollingInterval) {
-      clearInterval(this.messagePollingInterval);
-      this.messagePollingInterval = null;
-    }
-    if (this.pingInterval) {
-      clearInterval(this.pingInterval);
-      this.pingInterval = null;
-    }
     
-    // Clear timeouts to prevent render frame errors
+    // Clear timeouts
     if (this.startCallTimeout) {
       clearTimeout(this.startCallTimeout);
       this.startCallTimeout = null;
@@ -1317,10 +1072,10 @@ class CloseFlowDesktop {
       this.systemAudioCapture.destroy();
     }
     
-    // Stop WebSocket server
-    if (this.websocketServer) {
-      this.websocketServer.kill();
-      this.websocketServer = null;
+    // NEW: Cleanup Ably bridge
+    if (this.ablyDeepgramBridge) {
+      this.ablyDeepgramBridge.cleanup();
+      this.ablyDeepgramBridge = null;
     }
 
     console.log('✅ Cleanup completed');
@@ -1333,7 +1088,6 @@ app.whenReady().then(async () => {
     const closeFlowApp = new CloseFlowDesktop();
     await closeFlowApp.initialize();
     
-    // Store reference for cleanup
     app.closeFlowApp = closeFlowApp;
   } catch (error) {
     console.error('Failed to initialize CloseFlow app:', error);

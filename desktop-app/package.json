@@ -47,6 +47,7 @@
   "dependencies": {
     "ws": "^8.16.0",
     "node-mac-permissions": "^2.3.0",
-    "applescript": "^1.0.0"
+    "applescript": "^1.0.0",
+    "ably": "^2.0.1"
   }
 }
