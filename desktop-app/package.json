@@ -5,7 +5,7 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "ABLY_API_KEY=$ABLY_API_KEY electron . --dev",
+    "dev": "ABLY_API_KEY=vrVhOA.IbcrHQ:GNA8p_0hcl2gOGiNcwjh-k8R3AnmKQ0PYmTReJ0fNrQ electron . --dev",
     "test-capturer": "electron test-desktop-capturer.js",
     "build": "electron-builder",
     "build:mac": "electron-builder --mac",
