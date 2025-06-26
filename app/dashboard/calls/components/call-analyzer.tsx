@@ -434,6 +434,9 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     const ablyApiKey = process.env.NEXT_PUBLIC_ABLY_API_KEY;
     const deepgramApiKey = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
     
+    // 🚨🚨🚨 CRITICAL DEBUG: Add the debug log here
+    console.log('🚨🚨🚨 CRITICAL DEBUG: Raw Deepgram API key in web app:', deepgramApiKey);
+    
     console.log('🔑 ENHANCED LOGGING: Ably API key check - Present:', !!ablyApiKey);
     console.log('🔑 ENHANCED LOGGING: Deepgram API key check - Present:', !!deepgramApiKey);
     
