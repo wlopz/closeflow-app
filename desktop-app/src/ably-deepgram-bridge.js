@@ -129,6 +129,7 @@ class AblyDeepgramBridge {
         
       default:
         console.log('❓ ENHANCED LOGGING: Unknown control message:', message.name);
+        console.log('❓ ENHANCED LOGGING: Full unknown message:', message);
     }
   }
 
@@ -136,6 +137,8 @@ class AblyDeepgramBridge {
   handleAudioData(audioData) {
     console.log('🎤 ENHANCED LOGGING: Received audio data from desktop');
     console.log('🎤 ENHANCED LOGGING: Audio data size:', audioData.length);
+    console.log('🎤 ENHANCED LOGGING: Audio data type:', typeof audioData);
+    console.log('🎤 ENHANCED LOGGING: Is Buffer:', Buffer.isBuffer(audioData));
     console.log('🎤 ENHANCED LOGGING: Deepgram connection exists:', !!this.deepgramConnection);
     console.log('🎤 ENHANCED LOGGING: Deepgram ready flag:', this.deepgramReady);
     console.log('🎤 ENHANCED LOGGING: Transcription active flag:', this.transcriptionActive);
@@ -167,13 +170,21 @@ class AblyDeepgramBridge {
     if (!this.audioFormatValidated && this.receivedChunkCount <= 5) {
       console.log('🔍 ENHANCED LOGGING: Validating audio format (chunk', this.receivedChunkCount, ')');
       
+      // FIXED: Ensure we're working with a Buffer and use proper comparison
+      let buffer;
+      if (Buffer.isBuffer(audioData)) {
+        buffer = audioData;
+      } else {
+        buffer = Buffer.from(audioData);
+      }
+      
       // Check for WebM container signature
       const webmSignature = Buffer.from([0x1A, 0x45, 0xDF, 0xA3]);
-      if (audioData.length >= 4 && audioData.subarray(0, 4).equals(webmSignature)) {
+      if (buffer.length >= 4 && buffer.subarray(0, 4).equals(webmSignature)) {
         console.log('✅ ENHANCED LOGGING: Valid WebM container detected');
         this.audioFormatValidated = true;
       } else if (this.receivedChunkCount === 1) {
-        console.log('🔍 ENHANCED LOGGING: First chunk header:', audioData.slice(0, Math.min(32, audioData.length)));
+        console.log('🔍 ENHANCED LOGGING: First chunk header:', buffer.slice(0, Math.min(32, buffer.length)));
         console.log('🔍 ENHANCED LOGGING: Expected WebM signature:', webmSignature);
       }
       

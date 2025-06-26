@@ -46,6 +46,10 @@ class CloseFlowDesktop {
     this.ablyDeepgramBridge = null;
     this.ablyApiKey = process.env.ABLY_API_KEY || null;
     
+    // NEW: Periodic ping to web app
+    this.webAppPingInterval = null;
+    this.webAppPingIntervalMs = 5000; // 5 seconds
+    
     console.log('🔑 ENHANCED LOGGING: Ably API key present:', !!this.ablyApiKey);
   }
 
@@ -87,6 +91,9 @@ class CloseFlowDesktop {
     
     // Start connection management (simplified for Ably)
     this.startConnectionManagement();
+    
+    // NEW: Start periodic ping to web app
+    this.startWebAppPing();
   }
 
   // NEW: Initialize Ably Deepgram Bridge
@@ -110,6 +117,47 @@ class CloseFlowDesktop {
       this.isConnected = false;
       this.updateConnectionStatus('disconnected');
       this.updateTrayMenu();
+    }
+  }
+
+  // NEW: Start periodic ping to web app API
+  startWebAppPing() {
+    console.log('🏓 ENHANCED LOGGING: Starting periodic ping to web app API');
+    
+    this.webAppPingInterval = setInterval(async () => {
+      if (!this.isShuttingDown) {
+        await this.pingWebApp();
+      }
+    }, this.webAppPingIntervalMs);
+    
+    // Send initial ping
+    this.pingWebApp();
+  }
+
+  // NEW: Send ping to web app API
+  async pingWebApp() {
+    try {
+      console.log('🏓 ENHANCED LOGGING: Sending ping to web app API');
+      
+      const response = await fetch(`${this.webAppUrl}/api/desktop-sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'ping',
+          timestamp: Date.now()
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('🏓 ENHANCED LOGGING: Web app ping successful:', result.message);
+      } else {
+        console.log('⚠️ ENHANCED LOGGING: Web app ping failed with status:', response.status);
+      }
+    } catch (error) {
+      console.error('❌ ENHANCED LOGGING: Error pinging web app:', error.message);
     }
   }
 
@@ -183,11 +231,26 @@ class CloseFlowDesktop {
   }
 
   setupIPC() {
-    // NEW: Handle audio data chunks from renderer
+    // FIXED: Handle audio data chunks from renderer with proper Buffer conversion
     ipcMain.on('audio-data-chunk', (event, audioData) => {
       if (this.ablyDeepgramBridge && this.isCallActive) {
         console.log('🎤 ENHANCED LOGGING: Forwarding audio data to Ably bridge');
-        this.ablyDeepgramBridge.handleAudioData(audioData);
+        
+        // CRITICAL FIX: Ensure audioData is a proper Node.js Buffer
+        let bufferData;
+        if (Buffer.isBuffer(audioData)) {
+          bufferData = audioData;
+        } else if (audioData instanceof Uint8Array) {
+          bufferData = Buffer.from(audioData);
+        } else if (audioData instanceof ArrayBuffer) {
+          bufferData = Buffer.from(audioData);
+        } else {
+          console.error('❌ ENHANCED LOGGING: Unexpected audio data type:', typeof audioData);
+          return;
+        }
+        
+        console.log('🎤 ENHANCED LOGGING: Audio data converted to Buffer, size:', bufferData.length);
+        this.ablyDeepgramBridge.handleAudioData(bufferData);
       }
     });
 
@@ -1055,6 +1118,10 @@ class CloseFlowDesktop {
     if (this.connectionCheckInterval) {
       clearInterval(this.connectionCheckInterval);
       this.connectionCheckInterval = null;
+    }
+    if (this.webAppPingInterval) {
+      clearInterval(this.webAppPingInterval);
+      this.webAppPingInterval = null;
     }
     
     // Clear timeouts

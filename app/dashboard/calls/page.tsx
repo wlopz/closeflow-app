@@ -14,7 +14,6 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { CallAnalyzer } from './components/call-analyzer';
 import { CallHistoryDetailed } from '@/components/dashboard/call-history-detailed';
-import { supabase } from '@/lib/supabase/client';
 
 export default function CallsPage() {
   const [isCallActive, setIsCallActive] = useState(false);
@@ -43,86 +42,22 @@ export default function CallsPage() {
     return () => clearInterval(timer);
   }, [actualCallActive]);
 
-  // CRITICAL FIX: Proactive desktop message polling and processing
+  // SIMPLIFIED: Check desktop connection status via API (no longer needed for Ably)
   useEffect(() => {
     const checkDesktopStatus = async () => {
       try {
-        console.log('📊 ENHANCED LOGGING: CallsPage checking desktop status');
+        console.log('📊 ENHANCED LOGGING: CallsPage checking desktop status via API');
         
         const response = await fetch('/api/desktop-sync?action=status');
         const data = await response.json();
         
         console.log('📊 ENHANCED LOGGING: Desktop status response:', data);
         console.log('📊 ENHANCED LOGGING: Connected:', data.connected);
-        console.log('📊 ENHANCED LOGGING: Pending web app messages:', data.pendingWebAppMessages);
         
         setDesktopConnected(data.connected);
         
-        // CRITICAL: Proactively check for desktop call initiation messages
-        if (data.pendingWebAppMessages > 0) {
-          console.log('📨 ENHANCED LOGGING: Found pending messages for web app, fetching...');
-          
-          const messagesResponse = await fetch('/api/desktop-sync?action=get-messages-for-webapp');
-          
-          if (messagesResponse.ok) {
-            const messagesData = await messagesResponse.json();
-            console.log('📨 ENHANCED LOGGING: Messages received:', messagesData.messages);
-            
-            // Process each message
-            for (const message of messagesData.messages) {
-              console.log('📨 ENHANCED LOGGING: Processing message:', message);
-              
-              if (message.type === 'desktop-call-started') {
-                console.log('🎯 ENHANCED LOGGING: Desktop call started message detected in CallsPage');
-                
-                // CRITICAL: Set desktop call initiated immediately
-                setIsDesktopCallInitiated(true);
-                
-                // CRITICAL: Acknowledge the message to prevent reprocessing
-                try {
-                  await fetch('/api/desktop-sync', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      type: 'message-ack',
-                      messageId: message.id
-                    })
-                  });
-                  console.log('✅ ENHANCED LOGGING: Message acknowledged by CallsPage');
-                } catch (error) {
-                  console.error('❌ ENHANCED LOGGING: Error acknowledging message:', error);
-                }
-              } else if (message.type === 'desktop-call-stopped') {
-                console.log('🛑 ENHANCED LOGGING: Desktop call stopped message detected in CallsPage');
-                
-                // Reset desktop call states
-                setIsDesktopCallInitiated(false);
-                setIsDesktopCallActiveFromAnalyzer(false);
-                
-                // Acknowledge the message
-                try {
-                  await fetch('/api/desktop-sync', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      type: 'message-ack',
-                      messageId: message.id
-                    })
-                  });
-                  console.log('✅ ENHANCED LOGGING: Stop message acknowledged by CallsPage');
-                } catch (error) {
-                  console.error('❌ ENHANCED LOGGING: Error acknowledging stop message:', error);
-                }
-              }
-            }
-          }
-        }
-        
-        // CRITICAL: Reset desktop call initiation if desktop reports no active call
-        if (data.connected && !data.callActive && isDesktopCallInitiated && !isDesktopCallActiveFromAnalyzer) {
-          console.log('⚠️ ENHANCED LOGGING: Desktop reports no active call, resetting initiation state');
-          setIsDesktopCallInitiated(false);
-        }
+        // SIMPLIFIED: For Ably integration, we rely on the desktop app's ping mechanism
+        // The desktop app now sends periodic pings to the web app API
         
       } catch (error) {
         console.error('❌ ENHANCED LOGGING: Error checking desktop status from CallsPage:', error);
@@ -132,7 +67,7 @@ export default function CallsPage() {
     };
 
     checkDesktopStatus();
-    const interval = setInterval(checkDesktopStatus, 2000); // Check every 2 seconds for fast response
+    const interval = setInterval(checkDesktopStatus, 3000); // Check every 3 seconds
     return () => clearInterval(interval);
   }, [isDesktopCallInitiated, isDesktopCallActiveFromAnalyzer]);
   
@@ -259,7 +194,7 @@ export default function CallsPage() {
                   {isDesktopCallActiveFromAnalyzer ? (
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                      CallAnalyzer is actively managing desktop call
+                      CallAnalyzer is actively managing desktop call via Ably
                     </div>
                   ) : isDesktopCallInitiated ? (
                     <div className="flex items-center gap-2">
@@ -284,7 +219,7 @@ export default function CallsPage() {
                   Start a call to receive real-time AI guidance, transcription, and behavioral analysis.
                   {desktopConnected && (
                     <span className="block mt-2 text-sm text-green-600 dark:text-green-400">
-                      Desktop app is connected - calls can be started from either interface.
+                      Desktop app is connected via Ably - calls can be started from either interface.
                     </span>
                   )}
                 </p>
@@ -298,7 +233,7 @@ export default function CallsPage() {
                   </Button>
                   {!desktopConnected && (
                     <p className="text-xs text-muted-foreground">
-                      For Zoom integration, ensure the desktop app is running
+                      For Zoom integration, ensure the desktop app is running and connected to Ably
                     </p>
                   )}
                 </div>
