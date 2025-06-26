@@ -3,6 +3,11 @@ const { spawn } = require('child_process');
 
 class AudioWebSocketServer {
   constructor() {
+    // CRITICAL FIX: Add process start logging to detect unexpected restarts
+    console.log('🚀 ENHANCED LOGGING: AudioWebSocketServer constructor called - process starting/restarting');
+    console.log('🚀 ENHANCED LOGGING: Process PID:', process.pid);
+    console.log('🚀 ENHANCED LOGGING: Current time:', new Date().toISOString());
+    
     this.server = null;
     this.webAppConnection = null;
     this.desktopConnection = null;
@@ -12,6 +17,9 @@ class AudioWebSocketServer {
     this.isRecording = false;
     this.port = 8080;
     this.deepgramApiKey = null;
+    
+    // CRITICAL FIX: Add API key state tracking
+    console.log('🔑 ENHANCED LOGGING: Initial deepgramApiKey state:', this.deepgramApiKey);
     
     // Enhanced audio buffering system
     this.audioBuffer = [];
@@ -104,9 +112,15 @@ class AudioWebSocketServer {
           case 'start-transcription':
             console.log('🔗 ENHANCED LOGGING: Web app requested transcription start');
             
-            // CRITICAL FIX: Store the API key and THEN start Deepgram connection
+            // CRITICAL FIX: Store the API key and trace its value
+            console.log('🔑 ENHANCED LOGGING: Received deepgramApiKey from web app:', !!message.deepgramApiKey);
+            console.log('🔑 ENHANCED LOGGING: API key length:', message.deepgramApiKey?.length || 0);
+            
             this.deepgramApiKey = message.deepgramApiKey;
             this.transcriptionActive = true; // Set transcription as active
+            
+            console.log('🔑 ENHANCED LOGGING: Stored deepgramApiKey:', !!this.deepgramApiKey);
+            console.log('🔑 ENHANCED LOGGING: Transcription active:', this.transcriptionActive);
             
             // Only start Deepgram connection if we have an API key
             if (this.deepgramApiKey) {
@@ -147,6 +161,7 @@ class AudioWebSocketServer {
             // Wait for the web app to provide the API key
             this.transcriptionActive = true;
             console.log('🔄 ENHANCED LOGGING: Transcription active flag set to true, waiting for API key from web app');
+            console.log('🔑 ENHANCED LOGGING: Current deepgramApiKey state:', !!this.deepgramApiKey);
             break;
             
           case 'stop-audio-capture':
@@ -174,6 +189,7 @@ class AudioWebSocketServer {
           console.log('🎤 ENHANCED LOGGING: Deepgram connection ready state:', this.deepgramConnection?.readyState);
           console.log('🎤 ENHANCED LOGGING: Deepgram ready flag:', this.deepgramReady);
           console.log('🎤 ENHANCED LOGGING: Transcription active flag:', this.transcriptionActive);
+          console.log('🔑 ENHANCED LOGGING: API key available:', !!this.deepgramApiKey);
           
           // CRITICAL FIX: Always process audio data for buffering, regardless of transcriptionActive flag
           // The transcriptionActive flag should only control Deepgram connection establishment
@@ -216,6 +232,7 @@ class AudioWebSocketServer {
     console.log('📦 ENHANCED LOGGING: Deepgram not ready - buffering audio data');
     console.log('📦 ENHANCED LOGGING: Current buffer size:', this.audioBuffer.length);
     console.log('📦 ENHANCED LOGGING: Max buffer size:', this.maxBufferSize);
+    console.log('🔑 ENHANCED LOGGING: API key available for reconnection:', !!this.deepgramApiKey);
     
     // Initialize buffer start time if this is the first chunk
     if (this.audioBuffer.length === 0) {
@@ -313,6 +330,7 @@ class AudioWebSocketServer {
     // CRITICAL FIX: Don't attempt to reconnect if we don't have an API key
     if (!this.deepgramApiKey) {
       console.log('⚠️ ENHANCED LOGGING: Cannot reconnect to Deepgram - no API key available');
+      console.log('🔑 ENHANCED LOGGING: Current deepgramApiKey state:', this.deepgramApiKey);
       return;
     }
     
@@ -327,13 +345,19 @@ class AudioWebSocketServer {
     const delay = this.deepgramReconnectDelay * Math.pow(1.5, this.deepgramReconnectAttempts - 1);
     
     console.log(`🔄 ENHANCED LOGGING: Scheduling Deepgram reconnection in ${delay}ms (attempt ${this.deepgramReconnectAttempts}/${this.maxDeepgramReconnects})`);
+    console.log('🔑 ENHANCED LOGGING: API key available for scheduled reconnection:', !!this.deepgramApiKey);
     
     this.deepgramReconnectTimer = setTimeout(() => {
       console.log(`🔄 ENHANCED LOGGING: Executing Deepgram reconnection attempt ${this.deepgramReconnectAttempts}`);
+      console.log('🔑 ENHANCED LOGGING: API key available at reconnection time:', !!this.deepgramApiKey);
       this.deepgramReconnectTimer = null;
       
       if (this.transcriptionActive && this.deepgramApiKey) {
         this.startDeepgramConnection();
+      } else {
+        console.log('⚠️ ENHANCED LOGGING: Skipping reconnection - transcription inactive or no API key');
+        console.log('🔑 ENHANCED LOGGING: Transcription active:', this.transcriptionActive);
+        console.log('🔑 ENHANCED LOGGING: API key available:', !!this.deepgramApiKey);
       }
     }, delay);
   }
@@ -379,6 +403,7 @@ class AudioWebSocketServer {
     // CRITICAL FIX: Check for API key before attempting connection
     if (!this.deepgramApiKey) {
       console.error('❌ ENHANCED LOGGING: No Deepgram API key provided');
+      console.log('🔑 ENHANCED LOGGING: deepgramApiKey state:', this.deepgramApiKey);
       return;
     }
 
@@ -400,6 +425,7 @@ class AudioWebSocketServer {
 
     console.log('🔗 ENHANCED LOGGING: Connecting to Deepgram...');
     console.log('🔗 ENHANCED LOGGING: API key present:', !!this.deepgramApiKey);
+    console.log('🔗 ENHANCED LOGGING: API key length:', this.deepgramApiKey?.length || 0);
 
     const dgUrl = new URL('wss://api.deepgram.com/v1/listen');
     dgUrl.searchParams.set('model', 'nova-2');
@@ -420,17 +446,21 @@ class AudioWebSocketServer {
     console.log('🔗 ENHANCED LOGGING: Simplified Deepgram URL:', dgUrl.toString());
     console.log('🔗 ENHANCED LOGGING: Removed diarize, utterances, and endpointing parameters for better stability');
 
-    this.deepgramConnection = new WebSocket(dgUrl.toString(), ['token', this.deepgramApiKey]);
+    // CRITICAL FIX: Use local variable for WebSocket instance to prevent race conditions
+    const ws = new WebSocket(dgUrl.toString(), ['token', this.deepgramApiKey]);
 
-    this.deepgramConnection.on('open', () => {
-      // CRITICAL FIX: Add null check to prevent TypeError
-      if (!this.deepgramConnection) {
-        console.log('⚠️ ENHANCED LOGGING: Deepgram connection became null during open callback');
+    ws.on('open', () => {
+      // CRITICAL FIX: Check if connection is still valid before proceeding
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        console.log('⚠️ ENHANCED LOGGING: WebSocket connection invalid during open callback');
         return;
       }
 
       console.log('✅ ENHANCED LOGGING: Connected to Deepgram successfully');
-      console.log('✅ ENHANCED LOGGING: Deepgram connection ready state:', this.deepgramConnection.readyState);
+      console.log('✅ ENHANCED LOGGING: Deepgram connection ready state:', ws.readyState);
+      
+      // CRITICAL: Only assign to this.deepgramConnection after successful open
+      this.deepgramConnection = ws;
       
       // CRITICAL: Set Deepgram ready flag and send buffered audio
       this.deepgramReady = true;
@@ -454,7 +484,7 @@ class AudioWebSocketServer {
       }
     });
 
-    this.deepgramConnection.on('message', (data) => {
+    ws.on('message', (data) => {
       try {
         console.log('📨 ENHANCED LOGGING: Received message from Deepgram');
         console.log('📨 ENHANCED LOGGING: Raw Deepgram data length:', data.length);
@@ -509,11 +539,12 @@ class AudioWebSocketServer {
       }
     });
 
-    this.deepgramConnection.on('error', (error) => {
+    ws.on('error', (error) => {
       console.error('❌ ENHANCED LOGGING: Deepgram connection error:', error);
       console.error('❌ ENHANCED LOGGING: Error name:', error.name);
       console.error('❌ ENHANCED LOGGING: Error message:', error.message);
       console.error('❌ ENHANCED LOGGING: Error code:', error.code);
+      console.log('🔑 ENHANCED LOGGING: API key state during error:', !!this.deepgramApiKey);
       
       // CRITICAL: Reset Deepgram ready flag on error
       this.deepgramReady = false;
@@ -521,6 +552,11 @@ class AudioWebSocketServer {
       
       // Stop heartbeat on error
       this.stopDeepgramHeartbeat();
+      
+      // Only clear this.deepgramConnection if it matches the current ws instance
+      if (this.deepgramConnection === ws) {
+        this.deepgramConnection = null;
+      }
       
       // Schedule reconnection attempt if transcription is still active
       if (this.transcriptionActive) {
@@ -536,10 +572,11 @@ class AudioWebSocketServer {
       }
     });
 
-    this.deepgramConnection.on('close', (code, reason) => {
+    ws.on('close', (code, reason) => {
       console.log('🔗 ENHANCED LOGGING: Deepgram connection closed');
       console.log('🔗 ENHANCED LOGGING: Close code:', code);
       console.log('🔗 ENHANCED LOGGING: Close reason:', reason?.toString());
+      console.log('🔑 ENHANCED LOGGING: API key state during close:', !!this.deepgramApiKey);
       
       // CRITICAL: Reset Deepgram ready flag on close
       this.deepgramReady = false;
@@ -578,7 +615,10 @@ class AudioWebSocketServer {
           console.log('❓ ENHANCED LOGGING: Unknown close code:', code);
       }
       
-      this.deepgramConnection = null;
+      // Only clear this.deepgramConnection if it matches the current ws instance
+      if (this.deepgramConnection === ws) {
+        this.deepgramConnection = null;
+      }
       
       // Schedule reconnection attempt if transcription is still active
       if (this.transcriptionActive) {
@@ -609,6 +649,7 @@ class AudioWebSocketServer {
     if (this.deepgramConnection) {
       console.log('🛑 ENHANCED LOGGING: Closing Deepgram connection');
       console.log('🛑 ENHANCED LOGGING: Current connection state:', this.deepgramConnection.readyState);
+      console.log('🔑 ENHANCED LOGGING: API key state during stop:', !!this.deepgramApiKey);
       
       // CRITICAL: Reset Deepgram ready flag before closing
       this.deepgramReady = false;
