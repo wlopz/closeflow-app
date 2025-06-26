@@ -466,7 +466,7 @@ class AudioWebSocketServer {
     dgUrl.searchParams.set('smart_format', 'true');
     
     // CRITICAL FIX: Try different audio format configurations
-    dgUrl.searchParams.set('encoding', 'webm');
+    dgUrl.searchParams.set('encoding', 'opus');
     dgUrl.searchParams.set('sample_rate', '48000');
     dgUrl.searchParams.set('channels', '1');
     
