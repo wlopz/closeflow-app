@@ -596,6 +596,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
 
       // Send start transcription command to desktop app
       console.log('🔗 ENHANCED LOGGING: Sending start-transcription command via Ably...');
+      console.log('🔑 ENHANCED LOGGING: Deepgram API key being sent from web app:', !!deepgramApiKey);
       await controlChannel.current.publish('start-transcription', {
         deepgramApiKey: deepgramApiKey,
         timestamp: Date.now()
