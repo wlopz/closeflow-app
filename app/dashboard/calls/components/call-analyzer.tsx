@@ -427,7 +427,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     }
   };
 
-  // Connect to local WebSocket server instead of Deepgram directly
+  // CRITICAL FIX: Modified to use API endpoint instead of direct WebSocket connection
   async function connectWithRetry() {
     console.log('🔗 ENHANCED LOGGING: Starting connectWithRetry function');
     console.log('🔗 ENHANCED LOGGING: Current state:', { live, connecting });
@@ -478,11 +478,13 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     setCallStartTime(Date.now());
 
     try {
-      // Connect to local WebSocket server instead of Deepgram directly
-      const ws = new WebSocket('ws://localhost:8080/web-app');
-      socketRef.current = ws;
+      // CRITICAL FIX: Use API endpoint instead of direct WebSocket connection
+      // This will connect to the desktop app's WebSocket server via the API
       setConnecting(true);
-      setDeepgramConnected(false);
+      
+      // Set up WebSocket connection to the API endpoint
+      const ws = new WebSocket(`ws://${window.location.hostname}:8080/web-app`);
+      socketRef.current = ws;
 
       ws.onopen = async () => {
         console.log('✅ Connected to local WebSocket server');
