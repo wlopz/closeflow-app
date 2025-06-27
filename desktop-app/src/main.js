@@ -1,7 +1,6 @@
 const { app, BrowserWindow, ipcMain, Menu, Tray, dialog, systemPreferences, desktopCapturer } = require('electron');
 const path = require('path');
 const { execSync, spawn } = require('child_process');
-const SystemAudioCapture = require('./audio-capture');
 const AblyDeepgramBridge = require('./ably-deepgram-bridge');
 
 class CloseFlowDesktop {
@@ -27,7 +26,6 @@ class CloseFlowDesktop {
     
     this.isStartingCall = false;
     this.isStoppingCall = false;
-    this.systemAudioCapture = new SystemAudioCapture();
     this.isShuttingDown = false;
     
     // Add timeout references for proper cleanup
@@ -266,34 +264,7 @@ class CloseFlowDesktop {
         
         console.log('🎤 ENHANCED LOGGING: Starting call analysis with MIME type:', mimeType);
         
-        // If no MIME type was passed from renderer, try to get it from the renderer
-        let finalMimeType = mimeType;
-        if (!finalMimeType && this.isRendererSafe()) {
-          try {
-            console.log('🎤 ENHANCED LOGGING: No MIME type provided, attempting to retrieve from renderer...');
-            finalMimeType = await this.executeInRenderer(`
-              (() => {
-                if (window.closeFlowActualMimeType) {
-                  console.log('✅ Found MIME type in renderer:', window.closeFlowActualMimeType);
-                  return window.closeFlowActualMimeType;
-                } else {
-                  console.log('⚠️ No MIME type found in renderer window');
-                  return null;
-                }
-              })()
-            `);
-            
-            if (finalMimeType) {
-              console.log('✅ ENHANCED LOGGING: Retrieved MIME type from renderer:', finalMimeType);
-            } else {
-              console.log('⚠️ ENHANCED LOGGING: Could not retrieve MIME type from renderer');
-            }
-          } catch (error) {
-            console.error('❌ ENHANCED LOGGING: Error retrieving MIME type from renderer:', error);
-          }
-        }
-        
-        return await this.startCallAnalysis(finalMimeType);
+        return await this.startCallAnalysis(mimeType);
       } catch (error) {
         console.error('Error in start-call-analysis handler:', error);
         throw error;
@@ -932,18 +903,6 @@ class CloseFlowDesktop {
         isStoppingCall: this.isStoppingCall
       });
       
-      // Initialize system audio capture
-      const captureInitialized = await this.systemAudioCapture.initialize(this.selectedSystemAudioSource, this.mainWindow);
-      if (!captureInitialized) {
-        throw new Error('Failed to initialize system audio capture');
-      }
-
-      // Start system audio capture
-      const captureStarted = await this.systemAudioCapture.startCapture();
-      if (!captureStarted) {
-        throw new Error('Failed to start system audio capture');
-      }
-
       // NEW: Send start command to web app via HTTP POST with mimeType
       console.log('🚀 ENHANCED LOGGING: Sending desktop-request-start-call to web app');
       console.log('🎤 ENHANCED LOGGING: Including MIME type:', mimeType);
@@ -1006,7 +965,6 @@ class CloseFlowDesktop {
         isStoppingCall: this.isStoppingCall
       });
       
-      this.systemAudioCapture.stopCapture();
       throw error;
     }
   }
@@ -1026,9 +984,6 @@ class CloseFlowDesktop {
         isStartingCall: this.isStartingCall,
         isStoppingCall: this.isStoppingCall
       });
-      
-      // Stop system audio capture
-      this.systemAudioCapture.stopCapture();
       
       // NEW: Send stop command via Ably instead of HTTP
       if (this.ablyDeepgramBridge && this.ablyDeepgramBridge.controlChannel) {
@@ -1174,11 +1129,6 @@ class CloseFlowDesktop {
     if (this.stopCallTimeout) {
       clearTimeout(this.stopCallTimeout);
       this.stopCallTimeout = null;
-    }
-    
-    // Stop system audio capture
-    if (this.systemAudioCapture) {
-      this.systemAudioCapture.destroy();
     }
     
     // NEW: Cleanup Ably bridge
