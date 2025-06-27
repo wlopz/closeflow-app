@@ -9,7 +9,7 @@
     "test-capturer": "electron test-desktop-capturer.js",
     "build": "electron-builder",
     "build:mac": "electron-builder --mac",
-    "build:production": "CLOSEFLOW_WEB_APP_URL=https://prismatic-bombolone-9c6c5e.netlify.app/ ABLY_API_KEY=vrVhOA.IbcrHQ:GNA8p_0hcl2gOGiNcwjh-k8R3AnmKQ0PYmTReJ0fNrQ electron-builder --mac",
+    "build:production": "CLOSEFLOW_WEB_APP_URL=http://localhost:3000/ ABLY_API_KEY=vrVhOA.IbcrHQ:GNA8p_0hcl2gOGiNcwjh-k8R3AnmKQ0PYmTReJ0fNrQ electron-builder --mac",
     "pack": "electron-builder --dir",
     "dist": "electron-builder"
   },
