@@ -76,7 +76,7 @@ export default function CallsPage() {
     checkDesktopStatus();
     const interval = setInterval(checkDesktopStatus, 3000); // Check every 3 seconds
     return () => clearInterval(interval);
-  }, [isDesktopInitiatedCall, isDesktopCallActiveFromAnalyzer]);
+  }, [isDesktopCallInitiated, isDesktopCallActiveFromAnalyzer]);
   
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
