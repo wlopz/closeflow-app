@@ -33,8 +33,7 @@ class AblyDeepgramBridge {
     this.deepgramHeartbeatInterval = null;
     this.deepgramHeartbeatIntervalMs = 5000;
     
-    // Audio format validation
-    this.audioFormatValidated = false;
+    // Track received chunk count
     this.receivedChunkCount = 0;
   }
 
@@ -147,8 +146,8 @@ class AblyDeepgramBridge {
     console.log('🎤 ENHANCED LOGGING: Deepgram ready flag:', this.deepgramReady);
     console.log('🎤 ENHANCED LOGGING: Transcription active flag:', this.transcriptionActive);
 
-    // Validate audio format on first few chunks
-    this.validateAudioFormat(audioData);
+    // Track received chunks
+    this.receivedChunkCount++;
 
     if (this.deepgramReady && this.deepgramConnection && this.deepgramConnection.readyState === WebSocket.OPEN) {
       // Deepgram is ready, send immediately
@@ -165,37 +164,6 @@ class AblyDeepgramBridge {
     } else {
       // Deepgram not ready, buffer the audio data
       this.bufferAudioData(audioData);
-    }
-  }
-
-  validateAudioFormat(audioData) {
-    this.receivedChunkCount++;
-    
-    if (!this.audioFormatValidated && this.receivedChunkCount <= 5) {
-      console.log('🔍 ENHANCED LOGGING: Validating audio format (chunk', this.receivedChunkCount, ')');
-      
-      // FIXED: Ensure we're working with a Buffer and use proper comparison
-      let buffer;
-      if (Buffer.isBuffer(audioData)) {
-        buffer = audioData;
-      } else {
-        buffer = Buffer.from(audioData);
-      }
-      
-      // Check for WebM container signature
-      const webmSignature = Buffer.from([0x1A, 0x45, 0xDF, 0xA3]);
-      if (buffer.length >= 4 && buffer.subarray(0, 4).equals(webmSignature)) {
-        console.log('✅ ENHANCED LOGGING: Valid WebM container detected');
-        this.audioFormatValidated = true;
-      } else if (this.receivedChunkCount === 1) {
-        console.log('🔍 ENHANCED LOGGING: First chunk header:', buffer.slice(0, Math.min(32, buffer.length)));
-        console.log('🔍 ENHANCED LOGGING: Expected WebM signature:', webmSignature);
-      }
-      
-      if (this.receivedChunkCount === 5 && !this.audioFormatValidated) {
-        console.log('⚠️ ENHANCED LOGGING: Audio format validation failed after 5 chunks');
-        console.log('⚠️ ENHANCED LOGGING: This may cause Deepgram connection issues');
-      }
     }
   }
 
@@ -378,7 +346,7 @@ class AblyDeepgramBridge {
     dgUrl.searchParams.set('sample_rate', '48000');
     dgUrl.searchParams.set('channels', '1');
     
-    // NEW: Parse MIME type to determine encoding and container
+    // Parse MIME type to determine encoding and container
     let encoding = 'opus';
     let container = 'webm';
     

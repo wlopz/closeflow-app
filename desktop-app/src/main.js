@@ -28,10 +28,6 @@ class CloseFlowDesktop {
     this.isStoppingCall = false;
     this.isShuttingDown = false;
     
-    // Add timeout references for proper cleanup
-    this.startCallTimeout = null;
-    this.stopCallTimeout = null;
-    
     // Add flag to track if renderer is ready
     this.rendererReady = false;
     
@@ -498,14 +494,15 @@ class CloseFlowDesktop {
   }
 
   startZoomDetection() {
-    this.zoomCheckInterval = setInterval(() => {
+    this.zoomCheckInterval = setInterval(async () => {
       if (!this.isShuttingDown) {
-        this.checkZoomStatus();
+        await this.checkZoomStatus();
       }
     }, 3000);
   }
 
-  checkZoomStatus() {
+  // MODIFIED: Made async to check web app status
+  async checkZoomStatus() {
     try {
       let isZoomRunning = false;
       let isInMeeting = false;
@@ -550,6 +547,31 @@ class CloseFlowDesktop {
 
       const wasDetected = this.isZoomDetected;
       this.isZoomDetected = isInMeeting;
+
+      // NEW: Check web app call status
+      try {
+        const response = await fetch(`${this.webAppUrl}/api/desktop-sync?action=status`);
+        if (response.ok) {
+          const data = await response.json();
+          // Update our call active state based on web app's state
+          const wasCallActive = this.isCallActive;
+          this.isCallActive = data.callActive;
+          
+          // If call state changed, update UI
+          if (wasCallActive !== this.isCallActive) {
+            console.log(`📞 ENHANCED LOGGING: Call state changed from ${wasCallActive} to ${this.isCallActive} based on web app status`);
+            this.updateTrayMenu();
+            this.sendToRenderer('zoom-status-changed', {
+              detected: this.isZoomDetected,
+              callActive: this.isCallActive,
+              isStartingCall: this.isStartingCall,
+              isStoppingCall: this.isStoppingCall
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Error checking web app call status:', error);
+      }
 
       this.updateTrayMenu();
 
@@ -874,7 +896,7 @@ class CloseFlowDesktop {
     this.sendToRenderer('connection-status-changed', status);
   }
 
-  // Update the startCallAnalysis method to accept and pass mimeType
+  // MODIFIED: Removed timeout logic, simplified to just send request to web app
   async startCallAnalysis(mimeType = null) {
     if (!this.isZoomDetected) {
       throw new Error('No Zoom meeting detected');
@@ -903,7 +925,7 @@ class CloseFlowDesktop {
         isStoppingCall: this.isStoppingCall
       });
       
-      // NEW: Send start command to web app via HTTP POST with mimeType
+      // Send start command to web app via HTTP POST with mimeType
       console.log('🚀 ENHANCED LOGGING: Sending desktop-request-start-call to web app');
       console.log('🎤 ENHANCED LOGGING: Including MIME type:', mimeType);
       
@@ -918,7 +940,7 @@ class CloseFlowDesktop {
             input: this.selectedDevices.input,
             output: this.selectedDevices.output,
             systemAudioSource: this.selectedSystemAudioSource,
-            mimeType: mimeType // NEW: Include the MIME type
+            mimeType: mimeType // Include the MIME type
           },
           timestamp: Date.now()
         })
@@ -932,25 +954,16 @@ class CloseFlowDesktop {
       console.log('✅ Desktop request to start call analysis sent to web app');
       this.showNotification('Starting Analysis', 'Request sent to web app. Waiting for confirmation...');
       
-      // Set timeout for confirmation
-      this.startCallTimeout = setTimeout(() => {
-        if (this.isStartingCall && !this.isCallActive) {
-          console.log('⚠️ Timeout waiting for call start confirmation from web app');
-          this.isStartingCall = false;
-          this.isCallActive = true; // Assume success for now
-          this.startCallTimeout = null;
-          this.updateTrayMenu();
-          
-          this.sendToRenderer('zoom-status-changed', {
-            detected: this.isZoomDetected,
-            callActive: this.isCallActive,
-            isStartingCall: this.isStartingCall,
-            isStoppingCall: this.isStoppingCall
-          });
-          
-          this.showNotification('Analysis Started', 'Call analysis is now active.');
-        }
-      }, 5000);
+      // The call active state will be updated by checkZoomStatus based on web app status
+      this.isStartingCall = false;
+      this.updateTrayMenu();
+      
+      this.sendToRenderer('zoom-status-changed', {
+        detected: this.isZoomDetected,
+        callActive: this.isCallActive,
+        isStartingCall: this.isStartingCall,
+        isStoppingCall: this.isStoppingCall
+      });
       
       return { success: true };
     } catch (error) {
@@ -969,6 +982,7 @@ class CloseFlowDesktop {
     }
   }
 
+  // MODIFIED: Removed timeout logic, simplified to just send request to web app
   async stopCallAnalysis() {
     if (!this.isCallActive || this.isStoppingCall) {
       throw new Error('Call analysis not active or already stopping');
@@ -985,7 +999,7 @@ class CloseFlowDesktop {
         isStoppingCall: this.isStoppingCall
       });
       
-      // NEW: Send stop command via Ably instead of HTTP
+      // Send stop command via Ably instead of HTTP
       if (this.ablyDeepgramBridge && this.ablyDeepgramBridge.controlChannel) {
         await this.ablyDeepgramBridge.controlChannel.publish('stop-transcription', {
           timestamp: Date.now()
@@ -996,25 +1010,16 @@ class CloseFlowDesktop {
 
       this.showNotification('Stopping Analysis', 'Call analysis stopped.');
       
-      // Set timeout for confirmation
-      this.stopCallTimeout = setTimeout(() => {
-        if (this.isStoppingCall && this.isCallActive) {
-          console.log('⚠️ Timeout waiting for stop confirmation');
-          this.isStoppingCall = false;
-          this.isCallActive = false;
-          this.stopCallTimeout = null;
-          this.updateTrayMenu();
-          
-          this.sendToRenderer('zoom-status-changed', {
-            detected: this.isZoomDetected,
-            callActive: this.isCallActive,
-            isStartingCall: this.isStartingCall,
-            isStoppingCall: this.isStoppingCall
-          });
-          
-          this.showNotification('Stop Completed', 'Call analysis has been stopped.');
-        }
-      }, 3000); // Shorter timeout for Ably
+      // The call active state will be updated by checkZoomStatus based on web app status
+      this.isStoppingCall = false;
+      this.updateTrayMenu();
+      
+      this.sendToRenderer('zoom-status-changed', {
+        detected: this.isZoomDetected,
+        callActive: this.isCallActive,
+        isStartingCall: this.isStartingCall,
+        isStoppingCall: this.isStoppingCall
+      });
       
       return { success: true };
     } catch (error) {
@@ -1119,16 +1124,6 @@ class CloseFlowDesktop {
     if (this.webAppPingInterval) {
       clearInterval(this.webAppPingInterval);
       this.webAppPingInterval = null;
-    }
-    
-    // Clear timeouts
-    if (this.startCallTimeout) {
-      clearTimeout(this.startCallTimeout);
-      this.startCallTimeout = null;
-    }
-    if (this.stopCallTimeout) {
-      clearTimeout(this.stopCallTimeout);
-      this.stopCallTimeout = null;
     }
     
     // NEW: Cleanup Ably bridge
