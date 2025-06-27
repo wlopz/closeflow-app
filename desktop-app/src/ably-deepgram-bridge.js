@@ -457,14 +457,33 @@ class AblyDeepgramBridge {
         if (message.type === 'Results') {
           console.log('📝 ENHANCED LOGGING: Deepgram Results message received');
           
-          if (message.channel?.alternatives?.[0]) {
+          if (message.channel?.alternatives?.[0]?.transcript) {
             const alternative = message.channel.alternatives[0];
             console.log('📝 ENHANCED LOGGING: Transcript:', alternative.transcript);
             console.log('📝 ENHANCED LOGGING: Is final:', message.is_final);
             
-            if (alternative.words && alternative.words.length > 0) {
-              const speakers = new Set(alternative.words.map(w => w.speaker).filter(s => s !== undefined));
-              console.log('📝 ENHANCED LOGGING: Detected speakers:', Array.from(speakers));
+            // Try to get speaker from words array
+            const words = alternative.words;
+            if (words && words.length > 0) {
+              const speakerCounts = new Map();
+              words.forEach((word) => {
+                if (word.speaker !== undefined) {
+                  speakerCounts.set(word.speaker, (speakerCounts.get(word.speaker) || 0) + 1);
+                }
+              });
+              
+              if (speakerCounts.size > 0) {
+                let maxCount = 0;
+                let dominantSpeaker = undefined;
+                for (const [speaker, count] of speakerCounts.entries()) {
+                  if (count > maxCount) {
+                    maxCount = count;
+                    dominantSpeaker = speaker;
+                  }
+                }
+                console.log('📝 ENHANCED LOGGING: Detected speakers:', Array.from(speakerCounts.keys()));
+                console.log('📝 ENHANCED LOGGING: Dominant speaker:', dominantSpeaker);
+              }
             }
           }
         }

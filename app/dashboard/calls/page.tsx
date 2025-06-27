@@ -24,12 +24,12 @@ export default function CallsPage() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [desktopConnected, setDesktopConnected] = useState(false);
   
-  // CRITICAL FIX: Include desktop call initiation in the derived state
-  const actualCallActive = isCallActive || isDesktopCallInitiated || isDesktopCallActiveFromAnalyzer;
-  
   // Add this line to check the environment variable
   console.log('🔑 Deepgram API Key from CallsPage:', process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY);
 
+  // CRITICAL FIX: Include desktop call initiation in the derived state
+  const actualCallActive = isCallActive || isDesktopCallInitiated || isDesktopCallActiveFromAnalyzer;
+  
   // Timer for call duration
   useEffect(() => {
     let timer: NodeJS.Timeout;
@@ -76,7 +76,7 @@ export default function CallsPage() {
     checkDesktopStatus();
     const interval = setInterval(checkDesktopStatus, 3000); // Check every 3 seconds
     return () => clearInterval(interval);
-  }, [isDesktopCallInitiated, isDesktopCallActiveFromAnalyzer]);
+  }, [isDesktopInitiatedCall, isDesktopCallActiveFromAnalyzer]);
   
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
