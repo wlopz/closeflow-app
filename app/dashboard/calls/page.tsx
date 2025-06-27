@@ -59,8 +59,12 @@ export default function CallsPage() {
         
         setDesktopConnected(data.connected);
         
-        // SIMPLIFIED: For Ably integration, we rely on the desktop app's ping mechanism
-        // The desktop app now sends periodic pings to the web app API
+        // CRITICAL FIX: Update isDesktopCallInitiated based on callActive status from API
+        if (data.callActive && data.connected) {
+          setIsDesktopCallInitiated(true);
+        } else if (!data.callActive) {
+          setIsDesktopCallInitiated(false);
+        }
         
       } catch (error) {
         console.error('❌ ENHANCED LOGGING: Error checking desktop status from CallsPage:', error);
