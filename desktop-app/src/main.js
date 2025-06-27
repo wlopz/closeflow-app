@@ -54,7 +54,7 @@ class CloseFlowDesktop {
   // Get web app URL based on environment
   getWebAppUrl() {
     // Check for environment variable first (production)
-    const envUrl = 'http://localhost:3000/';
+    const envUrl = process.env.CLOSEFLOW_WEB_APP_URL;
     if (envUrl) {
       console.log('🌐 Using web app URL from environment variable:', envUrl);
       return envUrl;
