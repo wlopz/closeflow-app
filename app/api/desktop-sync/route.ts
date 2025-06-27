@@ -1,16 +1,3 @@
-/*
-  # Desktop Sync API Route - Fixed for Ably Integration
-
-  1. Fixes
-    - Return full message objects including id for acknowledgment
-    - Properly handle desktop-request-start-call messages
-    - Include MIME type and Deepgram API key in messages
-
-  2. Security
-    - Maintain existing RLS policies
-    - Validate message types and content
-*/
-
 import { NextRequest } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { createClient } from '@supabase/supabase-js';
@@ -355,12 +342,22 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  // CRITICAL FIX: Add immediate logging to confirm endpoint is being hit
+  console.log('🚨 CRITICAL DEBUG: POST endpoint hit at /api/desktop-sync');
+  console.log('🚨 CRITICAL DEBUG: Request method:', request.method);
+  console.log('🚨 CRITICAL DEBUG: Request URL:', request.url);
+  console.log('🚨 CRITICAL DEBUG: Current timestamp:', new Date().toISOString());
+  
   console.log('📮 ENHANCED LOGGING: POST request received');
   console.log('📮 ENHANCED LOGGING: Request URL:', request.url);
   console.log('📮 ENHANCED LOGGING: Request headers:', Object.fromEntries(request.headers.entries()));
   
   try {
     const body = await request.json();
+    console.log('🚨 CRITICAL DEBUG: POST body parsed successfully');
+    console.log('🚨 CRITICAL DEBUG: Request body type:', body.type);
+    console.log('🚨 CRITICAL DEBUG: Full request body:', JSON.stringify(body, null, 2));
+    
     console.log('📮 ENHANCED LOGGING: POST request body parsed successfully');
     console.log('📮 ENHANCED LOGGING: Request body:', body);
     console.log('📮 ENHANCED LOGGING: Message type:', body.type);
@@ -379,6 +376,7 @@ export async function POST(request: NextRequest) {
 
       // NEW CASE: Handle desktop-request-start-call
       case 'desktop-request-start-call':
+        console.log('🚨 CRITICAL DEBUG: Processing desktop-request-start-call');
         console.log('🚀 ENHANCED LOGGING: Desktop requested call start via HTTP');
         console.log('🚀 ENHANCED LOGGING: Device settings:', body.deviceSettings);
         console.log('🎤 ENHANCED LOGGING: MIME type from desktop:', body.deviceSettings?.mimeType);
@@ -401,6 +399,8 @@ export async function POST(request: NextRequest) {
           timestamp: body.timestamp
         };
         
+        console.log('🚨 CRITICAL DEBUG: About to store message in database:', startRequestMessage);
+        
         const { error: startRequestError } = await supabase.from('desktop_messages_queue').insert({
           id: startRequestMessage.id,
           message_type: startRequestMessage.type,
@@ -413,6 +413,8 @@ export async function POST(request: NextRequest) {
           console.error('❌ ENHANCED LOGGING: Error storing desktop start request:', startRequestError);
           return Response.json({ error: 'Failed to store start request' }, { status: 500 });
         }
+
+        console.log('🚨 CRITICAL DEBUG: Message stored successfully in database');
 
         // Update desktop ping and call state
         const { error: startPingError } = await supabase
@@ -428,6 +430,7 @@ export async function POST(request: NextRequest) {
         }
 
         console.log('✅ ENHANCED LOGGING: Desktop start request processed successfully');
+        console.log('🚨 CRITICAL DEBUG: Returning success response to desktop');
         return Response.json({ success: true, message: 'Start request received and will be processed by web app' });
 
       case 'message-ack':
@@ -588,10 +591,12 @@ export async function POST(request: NextRequest) {
       default:
         console.log('❓ ENHANCED LOGGING: Unknown POST message type:', body.type);
         console.log('❓ ENHANCED LOGGING: Full POST body:', body);
+        console.log('🚨 CRITICAL DEBUG: Unhandled message type in POST endpoint');
         return Response.json({ error: 'Unknown message type' }, { status: 400 });
     }
   } catch (error) {
     console.error('❌ ENHANCED LOGGING: Error handling POST request:', error);
+    console.error('🚨 CRITICAL DEBUG: POST endpoint error details:', error);
 
     if (error instanceof Error) {
       console.error('❌ ENHANCED LOGGING: Error name:', error.name);
