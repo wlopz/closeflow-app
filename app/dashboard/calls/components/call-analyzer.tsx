@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react'; // Added useCallback
+import { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -85,24 +85,83 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
   const { toast } = useToast();
   const { user, loading } = useAuth();
 
+  // CRITICAL FIX: React to desktop call initiation from parent
+  useEffect(() => {
+    const handleDesktopInitiation = async () => {
+      console.log('🎯 ENHANCED LOGGING: CallAnalyzer checking desktop initiation');
+      console.log('🎯 ENHANCED LOGGING: isDesktopInitiatedCall:', isDesktopInitiatedCall);
+      console.log('🎯 ENHANCED LOGGING: Current state:', { live, connecting, loading });
+      console.log('🎯 ENHANCED LOGGING: User authenticated:', !!user);
+      
+      // Only proceed if desktop initiated, not already live/connecting, auth is complete, and user is authenticated
+      if (isDesktopInitiatedCall && !live && !connecting && !loading && user) {
+        console.log('🎯 ENHANCED LOGGING: All conditions met, starting live analysis for desktop call');
+        
+        // Signal to parent that we're now actively handling the desktop call
+        if (onDesktopCallStateChange) {
+          onDesktopCallStateChange(true);
+        }
+        
+        // Start the live analysis
+        await startLive(true);
+      } else if (isDesktopInitiatedCall && loading) {
+        console.log('⏳ ENHANCED LOGGING: Desktop call initiated but authentication still loading');
+      } else if (isDesktopInitiatedCall && !user) {
+        console.log('❌ ENHANCED LOGGING: Desktop call initiated but no authenticated user');
+        
+        // Signal to parent that we can't handle the desktop call
+        if (onDesktopCallStateChange) {
+          onDesktopCallStateChange(false);
+        }
+      }
+    };
+    
+    handleDesktopInitiation();
+  }, [isDesktopInitiatedCall, live, connecting, loading, user]);
+
+  // Check desktop connection status
+  useEffect(() => {
+    const checkDesktopConnection = async () => {
+      try {
+        const response = await fetch('/api/desktop-sync?action=status');
+        const data = await response.json();
+        setDesktopConnected(data.connected);
+      } catch (error) {
+        console.error('Error checking desktop status:', error);
+        setDesktopConnected(false);
+      }
+    };
+
+    checkDesktopConnection();
+    const interval = setInterval(checkDesktopConnection, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, currentConversation]);
+
   // Clear silence timer
-  const clearSilenceTimer = useCallback(() => {
+  const clearSilenceTimer = () => {
     if (silenceTimer.current) {
       clearTimeout(silenceTimer.current);
       silenceTimer.current = null;
     }
-  }, []);
+  };
 
   // Clear long speech timer
-  const clearLongSpeechTimer = useCallback(() => {
+  const clearLongSpeechTimer = () => {
     if (longSpeechTimer.current) {
       clearTimeout(longSpeechTimer.current);
       longSpeechTimer.current = null;
     }
-  }, []);
+  };
 
   // Finalize the current speaker's complete conversation
-  const finalizeCurrentConversation = useCallback(async () => {
+  const finalizeCurrentConversation = async () => {
     const finalText = conversationAccumulator.current.trim();
     if (finalText && lastSpeaker.current !== null) {
       console.log(`✅ Finalizing conversation for Speaker ${lastSpeaker.current}: "${finalText}"`);
@@ -144,10 +203,10 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     // Clear timers and reset segment start time
     clearLongSpeechTimer();
     currentSegmentStartTime.current = 0;
-  }, [currentCallId, callStartTime, clearLongSpeechTimer]); // Added dependencies
+  };
 
   // Handle new transcript from Ably (which gets it from Deepgram via desktop app)
-  const handleTranscript = useCallback((transcript: string, isFinal: boolean, deepgramSpeaker?: number) => {
+  const handleTranscript = (transcript: string, isFinal: boolean, deepgramSpeaker?: number) => {
     if (!transcript || transcript.trim() === '') return;
     
     console.log(`🎤 Transcript: "${transcript}" (Final: ${isFinal}, Speaker: ${deepgramSpeaker})`);
@@ -231,10 +290,10 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
       
       setCurrentConversation(displayText);
     }
-  }, [messages.length, clearSilenceTimer, clearLongSpeechTimer, finalizeCurrentConversation]); // Added dependencies
+  };
 
   // Analyze message
-  const analyzeMessage = useCallback(async (text: string, speakerId: number, messageId: string) => {
+  const analyzeMessage = async (text: string, speakerId: number, messageId: string) => {
     try {
       const res = await fetch('/api/transcribe', {
         method: 'POST',
@@ -277,10 +336,10 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     } catch (e) {
       console.error('Analysis error:', e);
     }
-  }, [currentCallId, callStartTime]); // Added dependencies
+  };
 
   // Create a new call session in the database
-  const createCallSession = useCallback(async (): Promise<string | null> => {
+  const createCallSession = async (): Promise<string | null> => {
     console.log('🔐 ENHANCED LOGGING: createCallSession called');
     console.log('🔐 ENHANCED LOGGING: Auth loading state:', loading);
     console.log('🔐 ENHANCED LOGGING: User exists:', !!user);
@@ -342,10 +401,10 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
       });
       return null;
     }
-  }, [loading, user, isDesktopInitiatedCall, toast]); // Added dependencies
+  };
 
   // End the call session in the database
-  const endCallSession = useCallback(async (callId: string) => {
+  const endCallSession = async (callId: string) => {
     try {
       await CallsService.endCall(callId);
       console.log('✅ Ended call session:', callId);
@@ -365,77 +424,110 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     } catch (error) {
       console.error('❌ Error ending call session:', error);
     }
-  }, []);
+  };
 
-  // Function to stop live analysis
-  const stopLive = useCallback(() => {
-    console.log('🛑 ENHANCED LOGGING: stopLive function called');
-    console.log('🛑 ENHANCED LOGGING: Current state:', { live, connecting });
-    
-    clearLongSpeechTimer();
-    clearSilenceTimer();
-    finalizeCurrentConversation();
+  // NEW: Function to fetch messages from desktop_messages_queue
+  const fetchDesktopMessages = async () => {
+    try {
+      const response = await fetch('/api/desktop-sync?action=get-messages-for-webapp');
+      const data = await response.json();
+      
+      // ADD THIS LOG: Inspect the raw data.messages array
+      console.log('🔍 DEBUG: Raw messages received from API:', data.messages);
 
-    const rec = recorderRef.current;
-    if (rec && rec.state !== 'inactive') {
-      rec.stop();
-      rec.stream.getTracks().forEach(t => t.stop());
-      recorderRef.current = undefined;
+      if (data.messages && data.messages.length > 0) {
+        for (const msg of data.messages) {
+          // ADD THESE LOGS: Inspect each message object and its content
+          console.log('🔍 DEBUG: Processing message:', msg);
+          console.log('🔍 DEBUG: Message content:', msg.content);
+          console.log('🔍 DEBUG: Type of message content:', typeof msg.content);
+
+          if (msg.message_type === 'desktop-call-started') {
+            console.log('🎯 ENHANCED LOGGING: Received desktop-call-started message');
+            console.log('🎯 ENHANCED LOGGING: Device settings received:', msg.content.deviceSettings);
+            console.log('🎯 ENHANCED LOGGING: Deepgram API key received:', msg.content.deepgramApiKey ? 'Present' : 'Missing');
+            console.log('🎯 ENHANCED LOGGING: MIME type from desktop:', msg.content.deviceSettings?.mimeType);
+            
+            // Store the Deepgram API key and MIME type
+            process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY = msg.content.deepgramApiKey;
+            // You might want to store the MIME type in a ref or state if needed elsewhere
+            
+            // Acknowledge the message
+            await acknowledgeMessage(msg.id);
+            
+            // Trigger start of live analysis
+            if (!live && !connecting) {
+              await startLive(true);
+            }
+          } else if (msg.message_type === 'desktop-call-stopped') {
+            console.log('🛑 ENHANCED LOGGING: Received desktop-call-stopped message');
+            await acknowledgeMessage(msg.id);
+            if (live) {
+              stopLive();
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('❌ ENHANCED LOGGING: Error fetching desktop messages:', error);
     }
-    
-    // Send stop transcription command via Ably
-    if (controlChannel.current) {
-      console.log('🛑 ENHANCED LOGGING: Sending stop-transcription command via Ably...');
-      controlChannel.current.publish('stop-transcription', {
-        timestamp: Date.now()
-      }).catch(error => {
-        console.error('Error sending stop command via Ably:', error);
+  };
+
+  // NEW: Function to acknowledge message processing
+  const acknowledgeMessage = async (messageId: string) => {
+    try {
+      console.log('✅ ENHANCED LOGGING: Acknowledging message:', messageId);
+      
+      const response = await fetch('/api/desktop-sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'message-ack',
+          messageId
+        })
       });
+      
+      if (!response.ok) {
+        throw new Error('Failed to acknowledge message');
+      }
+      
+      console.log('✅ ENHANCED LOGGING: Message acknowledged successfully:', messageId);
+      return true;
+    } catch (error) {
+      console.error('❌ ENHANCED LOGGING: Error acknowledging message:', error);
+      return false;
     }
-    
-    // Close Ably connection
-    if (ablyClient.current) {
-      console.log('🛑 ENHANCED LOGGING: Closing Ably connection...');
-      ablyClient.current.close();
-      ablyClient.current = null;
+  };
+
+  // NEW: Periodically check for messages from desktop
+  useEffect(() => {
+    if (desktopConnected) {
+      // Initial check
+      fetchDesktopMessages();
+      
+      // Set up interval for checking
+      const interval = setInterval(fetchDesktopMessages, 2000);
+      
+      return () => clearInterval(interval);
     }
-    
-    controlChannel.current = null;
-    resultsChannel.current = null;
-    
-    setLive(false);
-    setConnecting(false);
-    setDeepgramConnected(false);
-    
-    // CRITICAL: Signal to parent that desktop call is no longer active
-    if (onDesktopCallStateChange) {
-      onDesktopCallStateChange(false);
-    }
-    
-    // Show feedback modal if we have a call session
-    if (currentCallId) {
-      setShowFeedbackModal(true);
-    }
-    
-    console.log('🛑 ENHANCED LOGGING: stopLive completed');
-  }, [live, connecting, clearLongSpeechTimer, clearSilenceTimer, finalizeCurrentConversation, onDesktopCallStateChange, currentCallId]); // Added dependencies
+  }, [desktopConnected]);
 
   // Connect to Ably and set up channels
-  const connectWithRetry = useCallback(async (desktopInitiatedDeviceSettings?: any, desktopInitiatedDeepgramApiKey?: string) => {
+  async function connectWithRetry() {
     console.log('🔗 ENHANCED LOGGING: connectWithRetry function entered');
     console.log('🔗 ENHANCED LOGGING: Starting connectWithRetry function with Ably');
     console.log('🔗 ENHANCED LOGGING: Current state:', { live, connecting });
     
     const ablyApiKey = process.env.NEXT_PUBLIC_ABLY_API_KEY;
-    // Prioritize passed API key, then state, then env
-    const deepgramApiKey = desktopInitiatedDeepgramApiKey || process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
-    // Prioritize passed device settings
-    const deviceSettings = desktopInitiatedDeviceSettings || {};
+    const deepgramApiKey = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
+    
+    // 🚨🚨🚨 CRITICAL DEBUG: Add the debug log here
+    console.log('🚨🚨🚨 CRITICAL DEBUG: Raw Deepgram API key in web app:', deepgramApiKey);
     
     console.log('🔑 ENHANCED LOGGING: Ably API key check - Present:', !!ablyApiKey);
     console.log('🔑 ENHANCED LOGGING: Deepgram API key check - Present:', !!deepgramApiKey);
-    console.log('🎤 ENHANCED LOGGING: Device settings available:', !!deviceSettings);
-    console.log('🎤 ENHANCED LOGGING: MIME type from device settings:', deviceSettings.mimeType);
     
     if (!ablyApiKey) {
       console.log('❌ ENHANCED LOGGING: No Ably API key found');
@@ -597,11 +689,8 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
       // Send start transcription command to desktop app
       console.log('🔗 ENHANCED LOGGING: Sending start-transcription command via Ably...');
       console.log('🔑 ENHANCED LOGGING: Deepgram API key being sent from web app:', !!deepgramApiKey);
-      console.log('🎤 ENHANCED LOGGING: MIME type being sent to desktop:', deviceSettings.mimeType);
-      
       await controlChannel.current.publish('start-transcription', {
         deepgramApiKey: deepgramApiKey,
-        mimeType: deviceSettings.mimeType, // NEW: Include the MIME type from desktop
         timestamp: Date.now()
       });
 
@@ -641,10 +730,9 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
         description: 'Failed to connect to desktop app via Ably. Please try again.'
       });
     }
-  }, [live, connecting, loading, user, toast, createCallSession, endCallSession, currentCallId, handleTranscript, clearSilenceTimer, clearLongSpeechTimer, stopLive]); // Added dependencies
+  }
 
-  // Function to start live analysis
-  const startLive = useCallback(async (triggeredByDesktop = false, deviceSettings?: any, deepgramApiKey?: string) => {
+  const startLive = async (triggeredByDesktop = false) => {
     console.log('🎯 ENHANCED LOGGING: startLive function entered');
     console.log('🎯 ENHANCED LOGGING: startLive function called');
     console.log('🎯 ENHANCED LOGGING: triggeredByDesktop:', triggeredByDesktop);
@@ -710,169 +798,63 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     }
 
     console.log('🎯 ENHANCED LOGGING: About to call connectWithRetry');
-    await connectWithRetry(deviceSettings, deepgramApiKey); // Pass details to connectWithRetry
+    await connectWithRetry();
     console.log('🎯 ENHANCED LOGGING: connectWithRetry completed');
-  }, [live, connecting, loading, user, toast, connectWithRetry]); // Added dependencies
+  };
 
-  // Function to handle messages from desktop app (moved inside component)
-  const handleDesktopMessage = useCallback(async (message: any) => {
-    console.log('📨 ENHANCED LOGGING: Processing desktop message:', message);
-    console.log('📨 ENHANCED LOGGING: handleDesktopMessage received:', message);
+  const stopLive = () => {
+    console.log('🛑 ENHANCED LOGGING: stopLive function called');
+    console.log('🛑 ENHANCED LOGGING: Current state:', { live, connecting });
     
-    // ADDED: More detailed logging of the message structure
-    console.log('🔍 ENHANCED LOGGING: Message type:', message.type);
-    console.log('🔍 ENHANCED LOGGING: Full message structure:', JSON.stringify(message, null, 2));
-    
-    if (message.deviceSettings) {
-      console.log('🔍 ENHANCED LOGGING: Device settings present:', message.deviceSettings);
-      console.log('🔍 ENHANCED LOGGING: MIME type in device settings:', message.deviceSettings.mimeType);
-    } else {
-      console.log('🔍 ENHANCED LOGGING: No device settings in message');
+    clearLongSpeechTimer();
+    clearSilenceTimer();
+    finalizeCurrentConversation();
+
+    const rec = recorderRef.current;
+    if (rec && rec.state !== 'inactive') {
+      rec.stop();
+      rec.stream.getTracks().forEach(t => t.stop());
+      recorderRef.current = undefined;
     }
     
-    if (message.deepgramApiKey) {
-      console.log('🔍 ENHANCED LOGGING: Deepgram API key present in message');
-    } else {
-      console.log('🔍 ENHANCED LOGGING: No Deepgram API key in message');
+    // Send stop transcription command via Ably
+    if (controlChannel.current) {
+      console.log('🛑 ENHANCED LOGGING: Sending stop-transcription command via Ably...');
+      controlChannel.current.publish('stop-transcription', {
+        timestamp: Date.now()
+      }).catch(error => {
+        console.error('Error sending stop command via Ably:', error);
+      });
     }
     
-    switch (message.type) {
-      case 'desktop-call-started':
-        console.log('🎯 ENHANCED LOGGING: Desktop call started message received');
-        console.log('🎤 ENHANCED LOGGING: Device settings:', message.deviceSettings);
-        console.log('🎤 ENHANCED LOGGING: MIME type from desktop:', message.deviceSettings?.mimeType);
-        console.log('🔑 ENHANCED LOGGING: Deepgram API key available:', !!message.deepgramApiKey);
-
-        console.log('🎯 ENHANCED LOGGING: Desktop call started message received, checking live state:', live);
-        
-        if (!live) {
-          console.log('🎯 ENHANCED LOGGING: Calling startLive from handleDesktopMessage'); 
-          console.log('🎯 ENHANCED LOGGING: Starting live analysis from desktop message');
-          await startLive(true, message.deviceSettings, message.deepgramApiKey); // Pass details directly
-        }
-        break;
-        
-      case 'desktop-call-stopped':
-        console.log('🛑 ENHANCED LOGGING: Desktop call stopped message received');
-        if (live) {
-          console.log('🛑 ENHANCED LOGGING: Stopping live analysis from desktop message');
-          stopLive();
-        }
-        break;
-        
-      default:
-        console.log('❓ ENHANCED LOGGING: Unknown desktop message type:', message.type);
+    // Close Ably connection
+    if (ablyClient.current) {
+      console.log('🛑 ENHANCED LOGGING: Closing Ably connection...');
+      ablyClient.current.close();
+      ablyClient.current = null;
     }
-  }, [live, startLive, stopLive]); // Added dependencies
-
-  // NEW: Effect to poll for messages from desktop_messages_queue
-  useEffect(() => {
-    const fetchDesktopMessages = async () => {
-      console.log('📨 ENHANCED LOGGING: Polling for desktop messages...');
-      try {
-        const response = await fetch('/api/desktop-sync?action=get-messages-for-webapp');
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
-        
-        if (data.messages && data.messages.length > 0) {
-          console.log('📨 ENHANCED LOGGING: Fetched messages for webapp:', data.messages);
-          
-          // ADDED: More detailed logging of the messages structure
-          console.log('🔍 ENHANCED LOGGING: Number of messages:', data.messages.length);
-          console.log('🔍 ENHANCED LOGGING: First message structure:', JSON.stringify(data.messages[0], null, 2));
-          
-          for (const msg of data.messages) {
-            // ADDED: Log the message content before processing
-            console.log('🔍 ENHANCED LOGGING: Processing message:', msg.id);
-            console.log('🔍 ENHANCED LOGGING: Message content structure:', JSON.stringify(msg.content, null, 2));
-            
-            if (msg.content && msg.content.deviceSettings) {
-              console.log('🔍 ENHANCED LOGGING: Device settings in message content:', msg.content.deviceSettings);
-              console.log('🔍 ENHANCED LOGGING: MIME type in device settings:', msg.content.deviceSettings.mimeType);
-            }
-            
-            await handleDesktopMessage(msg.content); // Pass the actual content of the message
-            
-            // Acknowledge message after processing
-            await fetch('/api/desktop-sync', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ type: 'message-ack', messageId: msg.id })
-            });
-            console.log('✅ ENHANCED LOGGING: Acknowledged message:', msg.id);
-          }
-        }
-      } catch (error) {
-        console.error('❌ ENHANCED LOGGING: Error fetching desktop messages:', error);
-      }
-    };
-
-    const interval = setInterval(fetchDesktopMessages, 2000); // Poll every 2 seconds
-    return () => clearInterval(interval);
-  }, [handleDesktopMessage]); // Depend on handleDesktopMessage
-
-  // CRITICAL FIX: React to desktop call initiation from parent
-  useEffect(() => {
-    const handleDesktopInitiation = async () => {
-      console.log('🎯 ENHANCED LOGGING: CallAnalyzer checking desktop initiation');
-      console.log('🎯 ENHANCED LOGGING: isDesktopInitiatedCall:', isDesktopInitiatedCall);
-      console.log('🎯 ENHANCED LOGGING: Current state:', { live, connecting, loading });
-      console.log('🎯 ENHANCED LOGGING: User authenticated:', !!user);
-      
-      // Only proceed if desktop initiated, not already live/connecting, auth is complete, and user is authenticated
-      if (isDesktopInitiatedCall && !live && !connecting && !loading && user) {
-        console.log('🎯 ENHANCED LOGGING: All conditions met, starting live analysis for desktop call');
-        
-        // Signal to parent that we're now actively handling the desktop call
-        if (onDesktopCallStateChange) {
-          onDesktopCallStateChange(true);
-        }
-        
-        // Start the live analysis
-        await startLive(true);
-      } else if (isDesktopInitiatedCall && loading) {
-        console.log('⏳ ENHANCED LOGGING: Desktop call initiated but authentication still loading');
-      } else if (isDesktopInitiatedCall && !user) {
-        console.log('❌ ENHANCED LOGGING: Desktop call initiated but no authenticated user');
-        
-        // Signal to parent that we can't handle the desktop call
-        if (onDesktopCallStateChange) {
-          onDesktopCallStateChange(false);
-        }
-      }
-    };
     
-    handleDesktopInitiation();
-  }, [isDesktopInitiatedCall, live, connecting, loading, user, onDesktopCallStateChange, startLive]); // Added dependencies
-
-  // Check desktop connection status
-  useEffect(() => {
-    const checkDesktopConnection = async () => {
-      try {
-        const response = await fetch('/api/desktop-sync?action=status');
-        const data = await response.json();
-        setDesktopConnected(data.connected);
-      } catch (error) {
-        console.error('Error checking desktop status:', error);
-        setDesktopConnected(false);
-      }
-    };
-
-    checkDesktopConnection();
-    const interval = setInterval(checkDesktopConnection, 3000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Auto-scroll to bottom when new messages arrive
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    controlChannel.current = null;
+    resultsChannel.current = null;
+    
+    setLive(false);
+    setConnecting(false);
+    setDeepgramConnected(false);
+    
+    // CRITICAL: Signal to parent that desktop call is no longer active
+    if (onDesktopCallStateChange) {
+      onDesktopCallStateChange(false);
     }
-  }, [messages, currentConversation]);
+    
+    // Show feedback modal if we have a call session
+    if (currentCallId) {
+      setShowFeedbackModal(true);
+    }
+    
+    console.log('🛑 ENHANCED LOGGING: stopLive completed');
+  };
 
-  const handleFeedbackModalClose = useCallback(() => {
+  const handleFeedbackModalClose = () => {
     setShowFeedbackModal(false);
     setCurrentCallId(null);
     setCallStartTime(0);
@@ -881,7 +863,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     if (onCallEnd) {
       onCallEnd();
     }
-  }, [onCallEnd]);
+  };
 
   const parseAnalysis = (analysisText: string, messageId: string, speakerId: number): Analysis[] => {
     const insights = [];
@@ -1079,7 +1061,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
   };
 
   // Get call data for feedback modal
-  const getCallDataForFeedback = useCallback(() => {
+  const getCallDataForFeedback = () => {
     if (!currentCallId) return { transcripts: [], insights: [] };
     
     const transcripts = messages.map(msg => ({
@@ -1097,9 +1079,9 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     }));
 
     return { transcripts, insights: insightData };
-  }, [currentCallId, messages, insights, callStartTime]); // Added dependencies
+  };
 
-  useEffect(() => () => stopLive(), [stopLive]); // Added stopLive to dependency array
+  useEffect(() => () => stopLive(), []);
 
   // Render authentication loading state
   if (loading) {

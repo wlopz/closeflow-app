@@ -211,7 +211,8 @@ export async function GET(request: NextRequest) {
           return Response.json({ error: 'Failed to retrieve messages' }, { status: 500 });
         }
 
-        console.log('📨 ENHANCED LOGGING: Messages to return to web app:', webAppMessages);
+        // ADD THIS LOG: Inspect the full webAppMessages array before returning
+        console.log('🔍 DEBUG: Raw webAppMessages from DB (before return):', webAppMessages);
         
         const webAppMessagesResponse = { messages: webAppMessages || [] };
         console.log('📨 ENHANCED LOGGING: Returning response to web app:', webAppMessagesResponse);
