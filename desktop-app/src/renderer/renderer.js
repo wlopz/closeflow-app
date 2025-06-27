@@ -335,7 +335,7 @@ class DesktopRenderer {
             this.analysisStatus.querySelector('p').textContent = 'Call analysis is active - check web app for real-time insights';
         } else if (this.isStartingCall) {
             this.analysisStatus.className = 'analysis-status';
-            this.analysisStatus.querySelector('p').textContent = 'Starting call analysis via Ably...';
+            this.analysisStatus.querySelector('p').textContent = 'Starting call analysis via HTTP...';
         } else if (this.isStoppingCall) {
             this.analysisStatus.className = 'analysis-status';
             this.analysisStatus.querySelector('p').textContent = 'Stopping call analysis...';
@@ -462,24 +462,24 @@ class DesktopRenderer {
             this.updateButtonStates();
             this.updateAnalysisStatus();
 
-            // NEW: Get the actual MIME type from the MediaRecorder
+            // CRITICAL FIX: Get the actual MIME type from the MediaRecorder
             let actualMimeType = null;
-            // The `mainWindow` and `webContents` are properties of the main process,
-            // not directly accessible in the renderer. This logic should be handled
-            // in the main process or passed from the main process.
-            // For now, we'll assume the main process will determine the MIME type.
-            // If the desktop app's audio-capture.js is correctly setting `window.closeFlowActualMimeType`,
-            // then the main process can retrieve it via `executeJavaScript`.
-            // However, the `renderer.js` itself cannot directly access `mainWindow`.
-            // The `mimeType` should be passed from the main process to the `start-call-analysis` IPC handler.
-            // For this `renderer.js` file, we will remove the direct access to `mainWindow`
-            // and assume the `mimeType` will be handled by the main process.
+            
+            console.log('🎤 ENHANCED LOGGING: Attempting to retrieve MIME type from window.closeFlowActualMimeType');
+            
+            // Check if the MIME type was set by the audio capture process
+            if (window.closeFlowActualMimeType) {
+                actualMimeType = window.closeFlowActualMimeType;
+                console.log('✅ ENHANCED LOGGING: Retrieved MIME type from window:', actualMimeType);
+            } else {
+                console.log('⚠️ ENHANCED LOGGING: No MIME type found in window.closeFlowActualMimeType, will be determined by main process');
+            }
 
             const result = await ipcRenderer.invoke('start-call-analysis', {
                 inputDeviceId: this.selectedDevices.input,
                 outputDeviceId: this.selectedDevices.output,
                 systemAudioSourceId: this.selectedSystemAudioSource,
-                mimeType: actualMimeType // This will be null here, but the main process will determine it.
+                mimeType: actualMimeType // Pass the actual MIME type (or null if not available)
             });
             
             if (!result.success) {
@@ -525,7 +525,7 @@ class DesktopRenderer {
     }
 
     setupAudioDebug() {
-        console.log('🎧 Setting up audio debug playback (Ably mode)');
+        console.log('🎧 Setting up audio debug playback (HTTP mode)');
         this.audioChunks = [];
     }
     
