@@ -422,6 +422,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
 
   // Connect to Ably and set up channels
   const connectWithRetry = useCallback(async (desktopInitiatedDeviceSettings?: any, desktopInitiatedDeepgramApiKey?: string) => {
+    console.log('🔗 ENHANCED LOGGING: connectWithRetry function entered');
     console.log('🔗 ENHANCED LOGGING: Starting connectWithRetry function with Ably');
     console.log('🔗 ENHANCED LOGGING: Current state:', { live, connecting });
     
@@ -644,6 +645,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
 
   // Function to start live analysis
   const startLive = useCallback(async (triggeredByDesktop = false, deviceSettings?: any, deepgramApiKey?: string) => {
+    console.log('🎯 ENHANCED LOGGING: startLive function entered');
     console.log('🎯 ENHANCED LOGGING: startLive function called');
     console.log('🎯 ENHANCED LOGGING: triggeredByDesktop:', triggeredByDesktop);
     console.log('🎯 ENHANCED LOGGING: Current state:', { live, connecting });
@@ -715,6 +717,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
   // Function to handle messages from desktop app (moved inside component)
   const handleDesktopMessage = useCallback(async (message: any) => {
     console.log('📨 ENHANCED LOGGING: Processing desktop message:', message);
+    console.log('📨 ENHANCED LOGGING: handleDesktopMessage received:', message);
     
     switch (message.type) {
       case 'desktop-call-started':
@@ -722,8 +725,11 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
         console.log('🎤 ENHANCED LOGGING: Device settings:', message.deviceSettings);
         console.log('🎤 ENHANCED LOGGING: MIME type from desktop:', message.deviceSettings?.mimeType);
         console.log('🔑 ENHANCED LOGGING: Deepgram API key available:', !!message.deepgramApiKey);
+
+        console.log('🎯 ENHANCED LOGGING: Desktop call started message received, checking live state:', live);
         
         if (!live) {
+          console.log('🎯 ENHANCED LOGGING: Calling startLive from handleDesktopMessage'); 
           console.log('🎯 ENHANCED LOGGING: Starting live analysis from desktop message');
           await startLive(true, message.deviceSettings, message.deepgramApiKey); // Pass details directly
         }
@@ -745,6 +751,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
   // NEW: Effect to poll for messages from desktop_messages_queue
   useEffect(() => {
     const fetchDesktopMessages = async () => {
+      console.log('📨 ENHANCED LOGGING: Polling for desktop messages...');
       try {
         const response = await fetch('/api/desktop-sync?action=get-messages-for-webapp');
         if (!response.ok) {
