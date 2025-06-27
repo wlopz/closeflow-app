@@ -63,6 +63,10 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
   const [desktopConnected, setDesktopConnected] = useState(false);
   const [deepgramConnected, setDeepgramConnected] = useState(false);
   
+  // CRITICAL FIX: Add state for Deepgram API key received from desktop
+  const [deepgramApiKeyFromDesktop, setDeepgramApiKeyFromDesktop] = useState<string | null>(null);
+  const [mimeTypeFromDesktop, setMimeTypeFromDesktop] = useState<string | null>(null);
+  
   // State for building complete conversations
   const [currentSpeaker, setCurrentSpeaker] = useState<number | null>(null);
   const [currentConversation, setCurrentConversation] = useState<string>('');
@@ -84,6 +88,100 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const { user, loading } = useAuth();
+
+  // NEW: Function to fetch messages from desktop_messages_queue
+  const fetchDesktopMessages = async () => {
+    try {
+      console.log('📨 ENHANCED LOGGING: Fetching messages from desktop_messages_queue');
+      
+      const response = await fetch('/api/desktop-sync?action=get-messages-for-webapp');
+      const data = await response.json();
+      
+      console.log('🔍 DEBUG: Raw messages received from API:', data.messages);
+
+      if (data.messages && data.messages.length > 0) {
+        for (const msg of data.messages) {
+          console.log('🔍 DEBUG: Processing message:', msg);
+          console.log('🔍 DEBUG: Message content:', msg.content);
+          console.log('🔍 DEBUG: Type of message content:', typeof msg.content);
+
+          if (msg.message_type === 'desktop-call-started') {
+            console.log('🎯 ENHANCED LOGGING: Received desktop-call-started message');
+            console.log('🎯 ENHANCED LOGGING: Device settings received:', msg.content.deviceSettings);
+            console.log('🎯 ENHANCED LOGGING: Deepgram API key received:', msg.content.deepgramApiKey ? 'Present' : 'Missing');
+            console.log('🎯 ENHANCED LOGGING: MIME type from desktop:', msg.content.deviceSettings?.mimeType);
+            
+            // CRITICAL FIX: Store the Deepgram API key in state instead of process.env
+            setDeepgramApiKeyFromDesktop(msg.content.deepgramApiKey);
+            setMimeTypeFromDesktop(msg.content.deviceSettings?.mimeType || null);
+            
+            // Acknowledge the message
+            await acknowledgeMessage(msg.id);
+            
+            // Trigger start of live analysis
+            if (!live && !connecting) {
+              console.log('🎯 ENHANCED LOGGING: Starting live analysis with desktop-provided API key');
+              await startLive(true);
+            }
+          } else if (msg.message_type === 'desktop-call-stopped') {
+            console.log('🛑 ENHANCED LOGGING: Received desktop-call-stopped message');
+            await acknowledgeMessage(msg.id);
+            if (live) {
+              stopLive();
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('❌ ENHANCED LOGGING: Error fetching desktop messages:', error);
+    }
+  };
+
+  // NEW: Function to acknowledge message processing
+  const acknowledgeMessage = async (messageId: string) => {
+    try {
+      console.log('✅ ENHANCED LOGGING: Acknowledging message:', messageId);
+      
+      const response = await fetch('/api/desktop-sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'message-ack',
+          messageId
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to acknowledge message');
+      }
+      
+      console.log('✅ ENHANCED LOGGING: Message acknowledged successfully:', messageId);
+      return true;
+    } catch (error) {
+      console.error('❌ ENHANCED LOGGING: Error acknowledging message:', error);
+      return false;
+    }
+  };
+
+  // NEW: Periodically check for messages from desktop
+  useEffect(() => {
+    if (desktopConnected) {
+      console.log('📨 ENHANCED LOGGING: Setting up desktop message polling');
+      
+      // Initial check
+      fetchDesktopMessages();
+      
+      // Set up interval for checking
+      const interval = setInterval(fetchDesktopMessages, 2000);
+      
+      return () => {
+        console.log('📨 ENHANCED LOGGING: Cleaning up desktop message polling');
+        clearInterval(interval);
+      };
+    }
+  }, [desktopConnected]);
 
   // CRITICAL FIX: React to desktop call initiation from parent
   useEffect(() => {
@@ -426,108 +524,20 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     }
   };
 
-  // NEW: Function to fetch messages from desktop_messages_queue
-  const fetchDesktopMessages = async () => {
-    try {
-      const response = await fetch('/api/desktop-sync?action=get-messages-for-webapp');
-      const data = await response.json();
-      
-      // ADD THIS LOG: Inspect the raw data.messages array
-      console.log('🔍 DEBUG: Raw messages received from API:', data.messages);
-
-      if (data.messages && data.messages.length > 0) {
-        for (const msg of data.messages) {
-          // ADD THESE LOGS: Inspect each message object and its content
-          console.log('🔍 DEBUG: Processing message:', msg);
-          console.log('🔍 DEBUG: Message content:', msg.content);
-          console.log('🔍 DEBUG: Type of message content:', typeof msg.content);
-
-          if (msg.message_type === 'desktop-call-started') {
-            console.log('🎯 ENHANCED LOGGING: Received desktop-call-started message');
-            console.log('🎯 ENHANCED LOGGING: Device settings received:', msg.content.deviceSettings);
-            console.log('🎯 ENHANCED LOGGING: Deepgram API key received:', msg.content.deepgramApiKey ? 'Present' : 'Missing');
-            console.log('🎯 ENHANCED LOGGING: MIME type from desktop:', msg.content.deviceSettings?.mimeType);
-            
-            // Store the Deepgram API key and MIME type
-            process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY = msg.content.deepgramApiKey;
-            // You might want to store the MIME type in a ref or state if needed elsewhere
-            
-            // Acknowledge the message
-            await acknowledgeMessage(msg.id);
-            
-            // Trigger start of live analysis
-            if (!live && !connecting) {
-              await startLive(true);
-            }
-          } else if (msg.message_type === 'desktop-call-stopped') {
-            console.log('🛑 ENHANCED LOGGING: Received desktop-call-stopped message');
-            await acknowledgeMessage(msg.id);
-            if (live) {
-              stopLive();
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error('❌ ENHANCED LOGGING: Error fetching desktop messages:', error);
-    }
-  };
-
-  // NEW: Function to acknowledge message processing
-  const acknowledgeMessage = async (messageId: string) => {
-    try {
-      console.log('✅ ENHANCED LOGGING: Acknowledging message:', messageId);
-      
-      const response = await fetch('/api/desktop-sync', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          type: 'message-ack',
-          messageId
-        })
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to acknowledge message');
-      }
-      
-      console.log('✅ ENHANCED LOGGING: Message acknowledged successfully:', messageId);
-      return true;
-    } catch (error) {
-      console.error('❌ ENHANCED LOGGING: Error acknowledging message:', error);
-      return false;
-    }
-  };
-
-  // NEW: Periodically check for messages from desktop
-  useEffect(() => {
-    if (desktopConnected) {
-      // Initial check
-      fetchDesktopMessages();
-      
-      // Set up interval for checking
-      const interval = setInterval(fetchDesktopMessages, 2000);
-      
-      return () => clearInterval(interval);
-    }
-  }, [desktopConnected]);
-
   // Connect to Ably and set up channels
-  async function connectWithRetry() {
+  async function connectWithRetry(deepgramApiKey?: string) {
     console.log('🔗 ENHANCED LOGGING: connectWithRetry function entered');
     console.log('🔗 ENHANCED LOGGING: Starting connectWithRetry function with Ably');
     console.log('🔗 ENHANCED LOGGING: Current state:', { live, connecting });
+    console.log('🔗 ENHANCED LOGGING: Deepgram API key provided:', !!deepgramApiKey);
     
     const ablyApiKey = process.env.NEXT_PUBLIC_ABLY_API_KEY;
-    const deepgramApiKey = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
     
-    // 🚨🚨🚨 CRITICAL DEBUG: Add the debug log here
-    console.log('🚨🚨🚨 CRITICAL DEBUG: Raw Deepgram API key in web app:', deepgramApiKey);
+    // CRITICAL FIX: Use the provided deepgramApiKey parameter or fallback to environment
+    const finalDeepgramApiKey = deepgramApiKey || process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
     
     console.log('🔑 ENHANCED LOGGING: Ably API key check - Present:', !!ablyApiKey);
-    console.log('🔑 ENHANCED LOGGING: Deepgram API key check - Present:', !!deepgramApiKey);
+    console.log('🔑 ENHANCED LOGGING: Final Deepgram API key check - Present:', !!finalDeepgramApiKey);
     
     if (!ablyApiKey) {
       console.log('❌ ENHANCED LOGGING: No Ably API key found');
@@ -539,7 +549,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
       return;
     }
 
-    if (!deepgramApiKey) {
+    if (!finalDeepgramApiKey) {
       console.log('❌ ENHANCED LOGGING: No Deepgram API key found');
       toast({
         variant: 'destructive',
@@ -688,9 +698,12 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
 
       // Send start transcription command to desktop app
       console.log('🔗 ENHANCED LOGGING: Sending start-transcription command via Ably...');
-      console.log('🔑 ENHANCED LOGGING: Deepgram API key being sent from web app:', !!deepgramApiKey);
+      console.log('🔑 ENHANCED LOGGING: Deepgram API key being sent from web app:', !!finalDeepgramApiKey);
+      console.log('🎤 ENHANCED LOGGING: MIME type being sent:', mimeTypeFromDesktop);
+      
       await controlChannel.current.publish('start-transcription', {
-        deepgramApiKey: deepgramApiKey,
+        deepgramApiKey: finalDeepgramApiKey,
+        mimeType: mimeTypeFromDesktop, // Include MIME type from desktop
         timestamp: Date.now()
       });
 
@@ -737,6 +750,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     console.log('🎯 ENHANCED LOGGING: startLive function called');
     console.log('🎯 ENHANCED LOGGING: triggeredByDesktop:', triggeredByDesktop);
     console.log('🎯 ENHANCED LOGGING: Current state:', { live, connecting });
+    console.log('🎯 ENHANCED LOGGING: Deepgram API key from desktop available:', !!deepgramApiKeyFromDesktop);
     
     // Check authentication state before proceeding
     if (loading) {
@@ -798,7 +812,8 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     }
 
     console.log('🎯 ENHANCED LOGGING: About to call connectWithRetry');
-    await connectWithRetry();
+    // CRITICAL FIX: Pass the Deepgram API key from desktop to connectWithRetry
+    await connectWithRetry(deepgramApiKeyFromDesktop || undefined);
     console.log('🎯 ENHANCED LOGGING: connectWithRetry completed');
   };
 
@@ -1163,6 +1178,11 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
             {currentCallId && (
               <div className="text-sm text-muted-foreground">
                 Call ID: {currentCallId.slice(0, 8)}...
+              </div>
+            )}
+            {deepgramApiKeyFromDesktop && (
+              <div className="text-sm text-muted-foreground">
+                Desktop API Key: Active
               </div>
             )}
           </div>
