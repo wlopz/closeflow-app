@@ -27,6 +27,9 @@ export default function CallsPage() {
   // CRITICAL FIX: Include desktop call initiation in the derived state
   const actualCallActive = isCallActive || isDesktopCallInitiated || isDesktopCallActiveFromAnalyzer;
   
+  // Add this line to check the environment variable
+  console.log('🔑 Deepgram API Key from CallsPage:', process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY);
+
   // Timer for call duration
   useEffect(() => {
     let timer: NodeJS.Timeout;
