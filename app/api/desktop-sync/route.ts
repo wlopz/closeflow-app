@@ -1,3 +1,16 @@
+/*
+  # Desktop Sync API Route - Fixed for Ably Integration
+
+  1. Fixes
+    - Return full message objects including id for acknowledgment
+    - Properly handle desktop-request-start-call messages
+    - Include MIME type and Deepgram API key in messages
+
+  2. Security
+    - Maintain existing RLS policies
+    - Validate message types and content
+*/
+
 import { NextRequest } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { createClient } from '@supabase/supabase-js';
@@ -198,9 +211,10 @@ export async function GET(request: NextRequest) {
       case 'get-messages-for-webapp':
         console.log('📨 ENHANCED LOGGING: Get messages for web app request received');
         
+        // CRITICAL FIX: Return full message objects including id for acknowledgment
         const { data: webAppMessages, error: webAppMessagesError } = await supabase
           .from('desktop_messages_queue')
-          .select('content')
+          .select('*') // Changed from select('content') to select('*')
           .eq('sender', 'desktop')
           .eq('recipient', 'webapp')
           .order('created_at', { ascending: true });
@@ -210,10 +224,9 @@ export async function GET(request: NextRequest) {
           return Response.json({ error: 'Failed to retrieve messages' }, { status: 500 });
         }
 
-        const formattedWebAppMessages = webAppMessages.map(msg => msg.content);
-        console.log('📨 ENHANCED LOGGING: Messages to return to web app:', formattedWebAppMessages);
+        console.log('📨 ENHANCED LOGGING: Messages to return to web app:', webAppMessages);
         
-        const webAppMessagesResponse = { messages: formattedWebAppMessages };
+        const webAppMessagesResponse = { messages: webAppMessages || [] };
         console.log('📨 ENHANCED LOGGING: Returning response to web app:', webAppMessagesResponse);
         
         return Response.json(webAppMessagesResponse);
