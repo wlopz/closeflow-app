@@ -32,6 +32,6 @@
 -        let actualMimeType = 'audio/webm;codecs=opus';
 +        let actualMimeType = 'audio/webm;codecs=opus'; // [part 1]
          
-         // The `window.closeFlowActualMimeType` is set in the renderer process
+         // The \`window.closeFlowActualMimeType` is set in the renderer process
          if (window.closeFlowActualMimeType) {
 ```
