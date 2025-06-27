@@ -641,7 +641,7 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
         description: 'Failed to connect to desktop app via Ably. Please try again.'
       });
     }
-  }, [live, connecting, loading, user, toast, createCallSession, endCallSession, currentCallId, handleTranscript, clearSilenceTimer, clearLongSpeechTimer]); // Added dependencies
+  }, [live, connecting, loading, user, toast, createCallSession, endCallSession, currentCallId, handleTranscript, clearSilenceTimer, clearLongSpeechTimer, stopLive]); // Added dependencies
 
   // Function to start live analysis
   const startLive = useCallback(async (triggeredByDesktop = false, deviceSettings?: any, deepgramApiKey?: string) => {
@@ -719,6 +719,23 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
     console.log('📨 ENHANCED LOGGING: Processing desktop message:', message);
     console.log('📨 ENHANCED LOGGING: handleDesktopMessage received:', message);
     
+    // ADDED: More detailed logging of the message structure
+    console.log('🔍 ENHANCED LOGGING: Message type:', message.type);
+    console.log('🔍 ENHANCED LOGGING: Full message structure:', JSON.stringify(message, null, 2));
+    
+    if (message.deviceSettings) {
+      console.log('🔍 ENHANCED LOGGING: Device settings present:', message.deviceSettings);
+      console.log('🔍 ENHANCED LOGGING: MIME type in device settings:', message.deviceSettings.mimeType);
+    } else {
+      console.log('🔍 ENHANCED LOGGING: No device settings in message');
+    }
+    
+    if (message.deepgramApiKey) {
+      console.log('🔍 ENHANCED LOGGING: Deepgram API key present in message');
+    } else {
+      console.log('🔍 ENHANCED LOGGING: No Deepgram API key in message');
+    }
+    
     switch (message.type) {
       case 'desktop-call-started':
         console.log('🎯 ENHANCED LOGGING: Desktop call started message received');
@@ -761,8 +778,23 @@ export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopIni
         
         if (data.messages && data.messages.length > 0) {
           console.log('📨 ENHANCED LOGGING: Fetched messages for webapp:', data.messages);
+          
+          // ADDED: More detailed logging of the messages structure
+          console.log('🔍 ENHANCED LOGGING: Number of messages:', data.messages.length);
+          console.log('🔍 ENHANCED LOGGING: First message structure:', JSON.stringify(data.messages[0], null, 2));
+          
           for (const msg of data.messages) {
+            // ADDED: Log the message content before processing
+            console.log('🔍 ENHANCED LOGGING: Processing message:', msg.id);
+            console.log('🔍 ENHANCED LOGGING: Message content structure:', JSON.stringify(msg.content, null, 2));
+            
+            if (msg.content && msg.content.deviceSettings) {
+              console.log('🔍 ENHANCED LOGGING: Device settings in message content:', msg.content.deviceSettings);
+              console.log('🔍 ENHANCED LOGGING: MIME type in device settings:', msg.content.deviceSettings.mimeType);
+            }
+            
             await handleDesktopMessage(msg.content); // Pass the actual content of the message
+            
             // Acknowledge message after processing
             await fetch('/api/desktop-sync', {
               method: 'POST',
