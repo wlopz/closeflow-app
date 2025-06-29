@@ -17,7 +17,7 @@ import { CallHistoryDetailed } from '@/components/dashboard/call-history-detaile
 
 export default function CallsPage() {
   const [isCallActive, setIsCallActive] = useState(false);
-  const [isDesktopCallActiveFromAnalyzer, setIsDesktopCallActiveFromAnalyzer] = useState(false);
+  const [desktopCallActive, setDesktopCallActive] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -27,7 +27,7 @@ export default function CallsPage() {
   console.log('🔑 Deepgram API Key from CallsPage:', process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY);
 
   // SIMPLIFIED: Derived state for actual call activity
-  const actualCallActive = isCallActive || isDesktopCallActiveFromAnalyzer;
+  const actualCallActive = isCallActive || desktopCallActive;
   
   // Timer for call duration
   useEffect(() => {
@@ -58,6 +58,9 @@ export default function CallsPage() {
         
         setDesktopConnected(data.connected);
         
+        // Update desktop call state based on backend state
+        setDesktopCallActive(data.callActive);
+        
       } catch (error) {
         console.error('❌ ENHANCED LOGGING: Error checking desktop status from CallsPage:', error);
         setDesktopConnected(false);
@@ -67,7 +70,7 @@ export default function CallsPage() {
     checkDesktopStatus();
     const interval = setInterval(checkDesktopStatus, 3000); // Check every 3 seconds
     return () => clearInterval(interval);
-  }, [isDesktopCallActiveFromAnalyzer]);
+  }, []);
   
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -84,16 +87,9 @@ export default function CallsPage() {
     }
   };
 
-  // CRITICAL: Callback to handle desktop call state changes from CallAnalyzer
-  const handleDesktopCallStateChange = (isActive: boolean) => {
-    console.log('📞 ENHANCED LOGGING: Desktop call state change from analyzer:', isActive);
-    setIsDesktopCallActiveFromAnalyzer(isActive);
-  };
-
   const handleCallEnd = () => {
     console.log('📞 ENHANCED LOGGING: handleCallEnd called');
     setIsCallActive(false);
-    setIsDesktopCallActiveFromAnalyzer(false); // CRITICAL: Reset desktop call state
     setElapsedTime(0);
     // Trigger refresh of call history
     setRefreshTrigger(prev => prev + 1);
@@ -132,7 +128,7 @@ export default function CallsPage() {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
                 </span>
-                {isDesktopCallActiveFromAnalyzer ? 'Desktop Call' : 'Live Call'} - {formatTime(elapsedTime)}
+                {desktopCallActive ? 'Desktop Call' : 'Live Call'} - {formatTime(elapsedTime)}
               </div>
             </Badge>
           )}
@@ -145,7 +141,7 @@ export default function CallsPage() {
             <div className="flex items-center gap-2">
               <Headphones className="h-5 w-5 text-primary" />
               <h2 className="font-semibold">Call Session</h2>
-              {isDesktopCallActiveFromAnalyzer && (
+              {desktopCallActive && (
                 <Badge variant="secondary" className="text-xs">
                   Desktop Active
                 </Badge>
@@ -170,7 +166,7 @@ export default function CallsPage() {
                 variant={actualCallActive ? "destructive" : "default"}
                 onClick={handleCallToggle}
                 className="gap-2"
-                disabled={isDesktopCallActiveFromAnalyzer} // Disable if desktop is controlling the call
+                disabled={desktopCallActive} // Disable if desktop is controlling the call
               >
                 <Phone className="h-4 w-4" />
                 {actualCallActive ? "End Call" : "Start Call"}
@@ -182,10 +178,10 @@ export default function CallsPage() {
             {actualCallActive ? (
               <div>
                 <div className="mb-4 text-sm text-muted-foreground">
-                  {isDesktopCallActiveFromAnalyzer ? (
+                  {desktopCallActive ? (
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                      CallAnalyzer is actively managing desktop call via Ably
+                      Desktop call is active - CallAnalyzer is processing audio
                     </div>
                   ) : (
                     'CallAnalyzer is active for manual call'
@@ -193,7 +189,7 @@ export default function CallsPage() {
                 </div>
                 <CallAnalyzer 
                   onCallEnd={handleCallEnd}
-                  onDesktopCallStateChange={handleDesktopCallStateChange}
+                  desktopCallActive={desktopCallActive}
                 />
               </div>
             ) : (
@@ -204,7 +200,7 @@ export default function CallsPage() {
                   Start a call to receive real-time AI guidance, transcription, and behavioral analysis.
                   {desktopConnected && (
                     <span className="block mt-2 text-sm text-green-600 dark:text-green-400">
-                      Desktop app is connected via Ably - calls can be started from either interface.
+                      Desktop app is connected - calls can be started from either interface.
                     </span>
                   )}
                 </p>
@@ -218,7 +214,7 @@ export default function CallsPage() {
                   </Button>
                   {!desktopConnected && (
                     <p className="text-xs text-muted-foreground">
-                      For Zoom integration, ensure the desktop app is running and connected to Ably
+                      For Zoom integration, ensure the desktop app is running and connected
                     </p>
                   )}
                 </div>

@@ -896,7 +896,7 @@ class CloseFlowDesktop {
     this.sendToRenderer('connection-status-changed', status);
   }
 
-  // MODIFIED: Removed timeout logic, simplified to just send request to web app
+  // MODIFIED: Improved to handle call state properly
   async startCallAnalysis(mimeType = null) {
     if (!this.isZoomDetected) {
       throw new Error('No Zoom meeting detected');
@@ -982,7 +982,7 @@ class CloseFlowDesktop {
     }
   }
 
-  // MODIFIED: Removed timeout logic, simplified to just send request to web app
+  // MODIFIED: Improved to handle call state properly
   async stopCallAnalysis() {
     if (!this.isCallActive || this.isStoppingCall) {
       throw new Error('Call analysis not active or already stopping');

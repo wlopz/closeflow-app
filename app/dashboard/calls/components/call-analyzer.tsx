@@ -1,1356 +1,714 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useState, useEffect, useRef } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { MessageSquare, Mic, MicOff, AlertTriangle, CheckCircle2, Info, Lightbulb, Target, TrendingUp, AlertCircle } from 'lucide-react';
+import { 
+  AlertCircle, 
+  AlertTriangle, 
+  Brain, 
+  CheckCircle, 
+  Lightbulb, 
+  MessageSquare, 
+  Target, 
+  TrendingUp, 
+  XCircle 
+} from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { cn } from '@/lib/utils';
+import { CallFeedbackModal } from '@/components/dashboard/call-feedback-modal';
 import { useAuth } from '@/lib/supabase/hooks';
 import { CallsService } from '@/lib/supabase/calls';
-import { CallFeedbackModal } from '@/components/dashboard/call-feedback-modal';
-import * as Ably from 'ably';
-
-interface Message {
-  id: string;
-  text: string;
-  speakerId: number;
-  timestamp: number;
-}
-
-interface Analysis {
-  type: 'objection' | 'opportunity' | 'buying-signal' | 'warning' | 'good-move' | 'next-step';
-  content: string;
-  timestamp: number;
-  messageId?: string;
-  speakerId?: number;
-}
-
-const SPEAKER_COLORS = [
-  {
-    bg: 'bg-blue-500',
-    text: 'text-white',
-    lightBg: 'bg-blue-50',
-    darkBg: 'dark:bg-blue-900/20',
-    name: 'You',
-    side: 'right'
-  },
-  {
-    bg: 'bg-green-500',
-    text: 'text-white',
-    lightBg: 'bg-green-50',
-    darkBg: 'dark:bg-green-900/20',
-    name: 'Customer',
-    side: 'left'
-  }
-];
+import { supabase } from '@/lib/supabase/client';
 
 interface CallAnalyzerProps {
-  onCallEnd?: () => void;
-  onDesktopCallStateChange?: (isActive: boolean) => void;
-  isDesktopInitiatedCall?: boolean;
+  onCallEnd: () => void;
+  desktopCallActive: boolean;
 }
 
-export function CallAnalyzer({ onCallEnd, onDesktopCallStateChange, isDesktopInitiatedCall }: CallAnalyzerProps) {
-  const [live, setLive] = useState(false);
-  const [connecting, setConnecting] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [insights, setInsights] = useState<Analysis[]>([]);
-  const [currentCallId, setCurrentCallId] = useState<string | null>(null);
-  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
-  const [callStartTime, setCallStartTime] = useState<number>(0);
-  const [desktopConnected, setDesktopConnected] = useState(false);
-  const [deepgramConnected, setDeepgramConnected] = useState(false);
+interface Transcript {
+  id: string;
+  speaker_id: number;
+  speaker_name: string;
+  content: string;
+  timestamp_offset: number;
+  is_final: boolean;
+}
+
+interface Insight {
+  id: string;
+  type: 'objection' | 'opportunity' | 'buying-signal' | 'warning' | 'good-move' | 'next-step';
+  content: string;
+  timestamp_offset: number;
+}
+
+export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps) {
+  // State
+  const [isLive, setIsLive] = useState(false);
+  const [callId, setCallId] = useState<string | null>(null);
+  const [transcripts, setTranscripts] = useState<Transcript[]>([]);
+  const [insights, setInsights] = useState<Insight[]>([]);
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [lastTranscriptTime, setLastTranscriptTime] = useState(0);
+  const [isEndingCall, setIsEndingCall] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [isPollingMessages, setIsPollingMessages] = useState(false);
+  const [lastMessageId, setLastMessageId] = useState<string | null>(null);
   
-  // NEW: Pending state for desktop-initiated calls
-  const [pendingDesktopStart, setPendingDesktopStart] = useState(false);
-  const [pendingDeepgramApiKey, setPendingDeepgramApiKey] = useState<string | null>(null);
-  const [pendingMimeType, setPendingMimeType] = useState<string | null>(null);
-  
-  // State for building complete conversations
-  const [currentSpeaker, setCurrentSpeaker] = useState<number | null>(null);
-  const [currentConversation, setCurrentConversation] = useState<string>('');
-  
-  // Refs for managing conversation accumulation
-  const conversationAccumulator = useRef<string>('');
-  const lastSpeaker = useRef<number | null>(null);
-  const silenceTimer = useRef<NodeJS.Timeout | null>(null);
-  const lastTranscriptTime = useRef<number>(Date.now());
-  const longSpeechTimer = useRef<NodeJS.Timeout | null>(null);
-  const currentSegmentStartTime = useRef<number>(0);
-  
-  // Ably client and channels
-  const ablyClient = useRef<Ably.Realtime | null>(null);
-  const controlChannel = useRef<Ably.RealtimeChannel | null>(null);
-  const resultsChannel = useRef<Ably.RealtimeChannel | null>(null);
-  
-  const recorderRef = useRef<MediaRecorder>();
+  // Refs
   const scrollRef = useRef<HTMLDivElement>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const messagePollingRef = useRef<NodeJS.Timeout | null>(null);
+  const transcriptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Hooks
   const { toast } = useToast();
-  const { user, loading } = useAuth();
-
-  // NEW: Function to fetch messages from desktop_messages_queue
-  const fetchDesktopMessages = async () => {
-    try {
-      console.log('📨 ENHANCED LOGGING: Fetching messages from desktop_messages_queue');
+  const { user } = useAuth();
+  
+  // Check if this is a desktop-initiated call
+  useEffect(() => {
+    console.log('🎯 ENHANCED LOGGING: CallAnalyzer checking desktop initiation');
+    console.log('🎯 ENHANCED LOGGING: Current state:', { isLive, callId, desktopCallActive });
+    console.log('🎯 ENHANCED LOGGING: User authenticated:', !!user);
+    
+    // If desktop call is active and we're not already live, start the call
+    if (desktopCallActive && !isLive && user) {
+      console.log('🎯 ENHANCED LOGGING: Desktop call is active, starting live analysis');
+      startLive();
+    } else if (desktopCallActive && !isLive && !user) {
+      console.log('⏳ ENHANCED LOGGING: Desktop call initiated but authentication still loading');
+    } else if (!desktopCallActive && isLive) {
+      console.log('🛑 ENHANCED LOGGING: Desktop call stopped, stopping live analysis');
+      stopLive();
+    }
+  }, [desktopCallActive, isLive, user]);
+  
+  // Timer for elapsed time
+  useEffect(() => {
+    if (isLive) {
+      timerRef.current = setInterval(() => {
+        setElapsedTime(prev => prev + 1);
+      }, 1000);
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      setElapsedTime(0);
+    }
+    
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [isLive]);
+  
+  // Auto-scroll to bottom when new transcripts arrive
+  useEffect(() => {
+    if (scrollRef.current && transcripts.length > 0) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [transcripts]);
+  
+  // Inactivity detection
+  useEffect(() => {
+    if (isLive && lastTranscriptTime > 0) {
+      if (transcriptTimeoutRef.current) {
+        clearTimeout(transcriptTimeoutRef.current);
+      }
       
-      const response = await fetch('/api/desktop-sync?action=get-messages-for-webapp');
-      const data = await response.json();
+      transcriptTimeoutRef.current = setTimeout(() => {
+        const inactiveTime = Date.now() - lastTranscriptTime;
+        if (inactiveTime > 60000) { // 1 minute of inactivity
+          toast({
+            title: "No speech detected",
+            description: "The call seems to be inactive. Consider ending it if the conversation is over.",
+            variant: "destructive"
+          });
+        }
+      }, 60000); // Check after 1 minute
+    }
+    
+    return () => {
+      if (transcriptTimeoutRef.current) {
+        clearTimeout(transcriptTimeoutRef.current);
+        transcriptTimeoutRef.current = null;
+      }
+    };
+  }, [lastTranscriptTime, isLive, toast]);
+  
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (messagePollingRef.current) clearInterval(messagePollingRef.current);
+      if (transcriptTimeoutRef.current) clearTimeout(transcriptTimeoutRef.current);
+    };
+  }, []);
+  
+  // Poll for desktop messages when desktop call is active
+  useEffect(() => {
+    const pollDesktopMessages = async () => {
+      if (!desktopCallActive || !isLive || isPollingMessages) return;
       
-      console.log('🔍 DEBUG: Raw messages received from API:', data.messages);
-
-      if (data.messages && data.messages.length > 0) {
-        for (const msg of data.messages) {
-          console.log('🔍 DEBUG: Processing message:', msg);
-          console.log('🔍 DEBUG: Message content:', msg.content);
-          console.log('🔍 DEBUG: Type of message content:', typeof msg.content);
-
-          if (msg.message_type === 'desktop-call-started') {
-            console.log('🎯 ENHANCED LOGGING: Received desktop-call-started message');
-            console.log('🎯 ENHANCED LOGGING: Device settings received:', msg.content.deviceSettings);
-            console.log('🎯 ENHANCED LOGGING: Deepgram API key received:', msg.content.deepgramApiKey ? 'Present' : 'Missing');
-            console.log('🎯 ENHANCED LOGGING: MIME type from desktop:', msg.content.deviceSettings?.mimeType);
+      try {
+        setIsPollingMessages(true);
+        
+        const response = await fetch('/api/desktop-sync?action=get-messages-for-webapp');
+        const data = await response.json();
+        
+        console.log('📨 ENHANCED LOGGING: Polled for desktop messages, received:', data.messages?.length || 0);
+        
+        if (data.messages && data.messages.length > 0) {
+          for (const message of data.messages) {
+            await processDesktopMessage(message);
             
-            // NEW: Store in pending state instead of immediately starting
-            setPendingDesktopStart(true);
-            setPendingDeepgramApiKey(msg.content.deepgramApiKey);
-            setPendingMimeType(msg.content.deviceSettings?.mimeType || null);
-            
-            // Acknowledge the message
-            await acknowledgeMessage(msg.id);
-            
-          } else if (msg.message_type === 'desktop-call-stopped') {
-            console.log('🛑 ENHANCED LOGGING: Received desktop-call-stopped message');
-            await acknowledgeMessage(msg.id);
-            if (live) {
-              stopLive();
+            // Acknowledge message processing
+            if (message.id) {
+              try {
+                await fetch('/api/desktop-sync', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    type: 'message-ack',
+                    messageId: message.id
+                  })
+                });
+                console.log('✅ ENHANCED LOGGING: Acknowledged message:', message.id);
+              } catch (ackError) {
+                console.error('❌ ENHANCED LOGGING: Error acknowledging message:', ackError);
+              }
             }
           }
         }
+      } catch (error) {
+        console.error('❌ ENHANCED LOGGING: Error polling for desktop messages:', error);
+      } finally {
+        setIsPollingMessages(false);
       }
-    } catch (error) {
-      console.error('❌ ENHANCED LOGGING: Error fetching desktop messages:', error);
+    };
+    
+    if (desktopCallActive && isLive) {
+      // Poll immediately on first activation
+      pollDesktopMessages();
+      
+      // Set up polling interval
+      messagePollingRef.current = setInterval(pollDesktopMessages, 2000);
+    } else {
+      // Clear polling interval when not needed
+      if (messagePollingRef.current) {
+        clearInterval(messagePollingRef.current);
+        messagePollingRef.current = null;
+      }
+    }
+    
+    return () => {
+      if (messagePollingRef.current) {
+        clearInterval(messagePollingRef.current);
+        messagePollingRef.current = null;
+      }
+    };
+  }, [desktopCallActive, isLive, isPollingMessages]);
+  
+  // Process messages from desktop app
+  const processDesktopMessage = async (message: any) => {
+    console.log('📨 ENHANCED LOGGING: Processing desktop message:', message);
+    
+    if (!message || !message.content) {
+      console.log('⚠️ ENHANCED LOGGING: Invalid message format:', message);
+      return;
+    }
+    
+    const { content } = message;
+    
+    switch (content.type) {
+      case 'desktop-call-started':
+        console.log('🚀 ENHANCED LOGGING: Desktop call started message received');
+        console.log('🚀 ENHANCED LOGGING: Device settings:', content.deviceSettings);
+        
+        // If we're not already live, start the call
+        if (!isLive && user) {
+          await startLive();
+          
+          // Confirm to desktop that we've started
+          try {
+            await fetch('/api/desktop-sync', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                type: 'web-app-call-started-confirmation',
+                timestamp: Date.now()
+              })
+            });
+            console.log('✅ ENHANCED LOGGING: Sent call started confirmation to desktop');
+          } catch (error) {
+            console.error('❌ ENHANCED LOGGING: Error sending call started confirmation:', error);
+          }
+        }
+        break;
+        
+      case 'desktop-call-stopped':
+        console.log('🛑 ENHANCED LOGGING: Desktop call stopped message received');
+        
+        // If we're live, stop the call
+        if (isLive) {
+          await stopLive();
+          
+          // Confirm to desktop that we've stopped
+          try {
+            await fetch('/api/desktop-sync', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                type: 'web-app-call-stopped-confirmation',
+                timestamp: Date.now()
+              })
+            });
+            console.log('✅ ENHANCED LOGGING: Sent call stopped confirmation to desktop');
+          } catch (error) {
+            console.error('❌ ENHANCED LOGGING: Error sending call stopped confirmation:', error);
+          }
+        }
+        break;
+        
+      default:
+        console.log('❓ ENHANCED LOGGING: Unknown message type from desktop:', content.type);
     }
   };
-
-  // NEW: Function to acknowledge message processing
-  const acknowledgeMessage = async (messageId: string) => {
+  
+  // Start live call analysis
+  const startLive = async () => {
+    if (isLive || isInitializing) return;
+    
     try {
-      console.log('✅ ENHANCED LOGGING: Acknowledging message:', messageId);
+      setIsInitializing(true);
+      setIsLoading(true);
       
-      const response = await fetch('/api/desktop-sync', {
+      console.log('🚀 ENHANCED LOGGING: Starting live call analysis');
+      
+      if (!user) {
+        toast({
+          title: "Authentication required",
+          description: "Please sign in to start call analysis",
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      // Create a new call record
+      const newCall = await CallsService.createCall({
+        user_id: user.id,
+        status: 'active',
+        start_time: new Date().toISOString()
+      });
+      
+      if (!newCall) {
+        throw new Error("Failed to create call record");
+      }
+      
+      setCallId(newCall.id);
+      console.log('✅ ENHANCED LOGGING: Created call record:', newCall.id);
+      
+      // Set up real-time subscription for transcripts
+      const transcriptSubscription = supabase
+        .channel(`call-transcripts-${newCall.id}`)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'call_transcripts',
+          filter: `call_id=eq.${newCall.id}`
+        }, (payload) => {
+          console.log('📝 ENHANCED LOGGING: New transcript received:', payload.new);
+          
+          const newTranscript = payload.new as Transcript;
+          
+          // Only add final transcripts to the UI
+          if (newTranscript.is_final) {
+            setTranscripts(prev => [...prev, newTranscript]);
+            setLastTranscriptTime(Date.now());
+          }
+        })
+        .subscribe();
+      
+      // Set up real-time subscription for insights
+      const insightSubscription = supabase
+        .channel(`call-insights-${newCall.id}`)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'ai_insights',
+          filter: `call_id=eq.${newCall.id}`
+        }, (payload) => {
+          console.log('🧠 ENHANCED LOGGING: New insight received:', payload.new);
+          
+          const newInsight = payload.new as Insight;
+          setInsights(prev => [...prev, newInsight]);
+          
+          // Show toast for important insights
+          if (['objection', 'buying-signal', 'warning'].includes(newInsight.type)) {
+            toast({
+              title: getInsightTitle(newInsight.type),
+              description: newInsight.content,
+              variant: newInsight.type === 'warning' ? 'destructive' : 'default'
+            });
+          }
+        })
+        .subscribe();
+      
+      // If this is a desktop-initiated call, notify the desktop app
+      if (desktopCallActive) {
+        try {
+          await fetch('/api/desktop-sync', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              type: 'web-app-call-started-confirmation',
+              callId: newCall.id,
+              timestamp: Date.now()
+            })
+          });
+          console.log('✅ ENHANCED LOGGING: Sent call started confirmation to desktop');
+        } catch (error) {
+          console.error('❌ ENHANCED LOGGING: Error sending call started confirmation:', error);
+        }
+      }
+      
+      setIsLive(true);
+      setIsLoading(false);
+      setIsInitializing(false);
+      
+      console.log('✅ ENHANCED LOGGING: Live call analysis started successfully');
+      
+      return () => {
+        transcriptSubscription.unsubscribe();
+        insightSubscription.unsubscribe();
+      };
+      
+    } catch (error) {
+      console.error('❌ ENHANCED LOGGING: Error starting live call analysis:', error);
+      
+      toast({
+        title: "Failed to start call",
+        description: error instanceof Error ? error.message : "An unexpected error occurred",
+        variant: "destructive"
+      });
+      
+      setIsLive(false);
+      setIsLoading(false);
+      setIsInitializing(false);
+    }
+  };
+  
+  // Stop live call analysis
+  const stopLive = async () => {
+    console.log('🛑 ENHANCED LOGGING: stopLive function called');
+    console.log('🛑 ENHANCED LOGGING: Current state:', { isLive, callId, isEndingCall });
+    
+    if (!isLive || !callId || isEndingCall) return;
+    
+    try {
+      setIsEndingCall(true);
+      
+      // End the call in the database
+      await CallsService.endCall(callId, 'pending');
+      
+      // If this is a desktop-initiated call, notify the desktop app
+      if (desktopCallActive) {
+        try {
+          await fetch('/api/desktop-sync', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              type: 'web-app-call-stopped-confirmation',
+              callId: callId,
+              timestamp: Date.now()
+            })
+          });
+          console.log('✅ ENHANCED LOGGING: Sent call stopped confirmation to desktop');
+        } catch (error) {
+          console.error('❌ ENHANCED LOGGING: Error sending call stopped confirmation:', error);
+        }
+      }
+      
+      // Reset state
+      setIsLive(false);
+      setShowFeedback(true);
+      
+    } catch (error) {
+      console.error('❌ ENHANCED LOGGING: Error stopping live call analysis:', error);
+      
+      toast({
+        title: "Failed to end call",
+        description: error instanceof Error ? error.message : "An unexpected error occurred",
+        variant: "destructive"
+      });
+      
+    } finally {
+      setIsEndingCall(false);
+      
+      // Notify parent component
+      onCallEnd();
+      
+      console.log('🛑 ENHANCED LOGGING: stopLive completed');
+    }
+  };
+  
+  // Process transcript for analysis
+  const processTranscript = async (transcript: Transcript) => {
+    if (!callId || !transcript.content || transcript.content.length < 30) return;
+    
+    try {
+      setIsProcessing(true);
+      
+      const response = await fetch('/api/transcribe', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          type: 'message-ack',
-          messageId
+          transcript: transcript.content,
+          speakerId: transcript.speaker_id
         })
       });
       
       if (!response.ok) {
-        throw new Error('Failed to acknowledge message');
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to analyze transcript');
       }
       
-      console.log('✅ ENHANCED LOGGING: Message acknowledged successfully:', messageId);
-      return true;
+      const data = await response.json();
+      
+      if (data.analysis && data.analysis.trim()) {
+        // Determine insight type based on content
+        const type = determineInsightType(data.analysis);
+        
+        // Store insight in database
+        await CallsService.addInsight({
+          call_id: callId,
+          transcript_id: transcript.id,
+          type,
+          content: data.analysis,
+          timestamp_offset: transcript.timestamp_offset
+        });
+      }
+      
     } catch (error) {
-      console.error('❌ ENHANCED LOGGING: Error acknowledging message:', error);
-      return false;
+      console.error('❌ ENHANCED LOGGING: Error processing transcript:', error);
+    } finally {
+      setIsProcessing(false);
     }
   };
-
-  // NEW: Periodically check for messages from desktop
-  useEffect(() => {
-    if (desktopConnected) {
-      console.log('📨 ENHANCED LOGGING: Setting up desktop message polling');
-      
-      // Initial check
-      fetchDesktopMessages();
-      
-      // Set up interval for checking
-      const interval = setInterval(fetchDesktopMessages, 2000);
-      
-      return () => {
-        console.log('📨 ENHANCED LOGGING: Cleaning up desktop message polling');
-        clearInterval(interval);
-      };
-    }
-  }, [desktopConnected]);
-
-  // NEW: Handle pending desktop start when authentication is ready
-  useEffect(() => {
-    const handlePendingDesktopStart = async () => {
-      console.log('🎯 ENHANCED LOGGING: Checking pending desktop start');
-      console.log('🎯 ENHANCED LOGGING: pendingDesktopStart:', pendingDesktopStart);
-      console.log('🎯 ENHANCED LOGGING: loading:', loading);
-      console.log('🎯 ENHANCED LOGGING: user exists:', !!user);
-      console.log('🎯 ENHANCED LOGGING: live:', live);
-      console.log('🎯 ENHANCED LOGGING: connecting:', connecting);
-      
-      if (pendingDesktopStart && !loading && user && !live && !connecting) {
-        console.log('🎯 ENHANCED LOGGING: All conditions met, starting live analysis for desktop call');
-        
-        // Signal to parent that we're now actively handling the desktop call
-        if (onDesktopCallStateChange) {
-          onDesktopCallStateChange(true);
-        }
-        
-        // Start the live analysis with stored parameters
-        await startLive(true, pendingDeepgramApiKey || undefined, pendingMimeType || undefined);
-        
-        // Reset pending state
-        setPendingDesktopStart(false);
-        setPendingDeepgramApiKey(null);
-        setPendingMimeType(null);
-      } else if (pendingDesktopStart && loading) {
-        console.log('⏳ ENHANCED LOGGING: Desktop call pending but authentication still loading');
-      } else if (pendingDesktopStart && !user) {
-        console.log('❌ ENHANCED LOGGING: Desktop call pending but no authenticated user');
-        
-        // Reset pending state and signal failure
-        setPendingDesktopStart(false);
-        setPendingDeepgramApiKey(null);
-        setPendingMimeType(null);
-        
-        if (onDesktopCallStateChange) {
-          onDesktopCallStateChange(false);
-        }
-      }
-    };
+  
+  // Determine insight type based on content
+  const determineInsightType = (content: string): Insight['type'] => {
+    const lowerContent = content.toLowerCase();
     
-    handlePendingDesktopStart();
-  }, [pendingDesktopStart, loading, user, live, connecting]);
-
-  // Check desktop connection status
-  useEffect(() => {
-    const checkDesktopConnection = async () => {
-      try {
-        const response = await fetch('/api/desktop-sync?action=status');
-        const data = await response.json();
-        setDesktopConnected(data.connected);
-      } catch (error) {
-        console.error('Error checking desktop status:', error);
-        setDesktopConnected(false);
-      }
-    };
-
-    checkDesktopConnection();
-    const interval = setInterval(checkDesktopConnection, 3000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Auto-scroll to bottom when new messages arrive
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, currentConversation]);
-
-  // Clear silence timer
-  const clearSilenceTimer = () => {
-    if (silenceTimer.current) {
-      clearTimeout(silenceTimer.current);
-      silenceTimer.current = null;
-    }
-  };
-
-  // Clear long speech timer
-  const clearLongSpeechTimer = () => {
-    if (longSpeechTimer.current) {
-      clearTimeout(longSpeechTimer.current);
-      longSpeechTimer.current = null;
-    }
-  };
-
-  // Finalize the current speaker's complete conversation
-  const finalizeCurrentConversation = async () => {
-    const finalText = conversationAccumulator.current.trim();
-    if (finalText && lastSpeaker.current !== null) {
-      console.log(`✅ Finalizing conversation for Speaker ${lastSpeaker.current}: "${finalText}"`);
-      
-      const newMessage: Message = {
-        id: `msg-${Date.now()}-${lastSpeaker.current}`,
-        text: finalText,
-        speakerId: lastSpeaker.current,
-        timestamp: Date.now()
-      };
-      
-      // Add completed message to the top (newest first)
-      setMessages(prev => [newMessage, ...prev]);
-      
-      // Store transcript in database if we have an active call
-      if (currentCallId) {
-        await CallsService.addTranscript({
-          call_id: currentCallId,
-          speaker_id: lastSpeaker.current,
-          speaker_name: SPEAKER_COLORS[lastSpeaker.current]?.name || `Speaker ${lastSpeaker.current + 1}`,
-          content: finalText,
-          timestamp_offset: Math.floor((Date.now() - callStartTime) / 1000),
-          is_final: true
-        });
-      }
-      
-      // Analyze if long enough
-      if (finalText.length >= 30) {
-        analyzeMessage(finalText, lastSpeaker.current, newMessage.id);
-      }
-    }
-    
-    // Reset accumulator and current conversation
-    conversationAccumulator.current = '';
-    setCurrentConversation('');
-    setCurrentSpeaker(null);
-    lastSpeaker.current = null;
-    
-    // Clear timers and reset segment start time
-    clearLongSpeechTimer();
-    currentSegmentStartTime.current = 0;
-  };
-
-  // Handle new transcript from Ably (which gets it from Deepgram via desktop app)
-  const handleTranscript = (transcript: string, isFinal: boolean, deepgramSpeaker?: number) => {
-    if (!transcript || transcript.trim() === '') return;
-    
-    console.log(`🎤 Transcript: "${transcript}" (Final: ${isFinal}, Speaker: ${deepgramSpeaker})`);
-    
-    // Update last transcript time
-    lastTranscriptTime.current = Date.now();
-    
-    // Determine speaker (use Deepgram's speaker or alternate based on message count)
-    let speakerId = 0;
-    if (deepgramSpeaker !== undefined && deepgramSpeaker >= 0) {
-      speakerId = deepgramSpeaker;
+    if (lowerContent.includes('objection') || lowerContent.includes('concern')) {
+      return 'objection';
+    } else if (lowerContent.includes('buying signal') || lowerContent.includes('interest')) {
+      return 'buying-signal';
+    } else if (lowerContent.includes('warning') || lowerContent.includes('caution')) {
+      return 'warning';
+    } else if (lowerContent.includes('good move') || lowerContent.includes('well done')) {
+      return 'good-move';
+    } else if (lowerContent.includes('next step') || lowerContent.includes('should')) {
+      return 'next-step';
     } else {
-      // Simple alternating logic if no speaker info
-      speakerId = messages.length % 2;
-    }
-    
-    // Check if this is a different speaker
-    const isDifferentSpeaker = lastSpeaker.current !== null && lastSpeaker.current !== speakerId;
-    
-    if (isDifferentSpeaker) {
-      // Different speaker detected - finalize previous speaker's conversation
-      console.log(`🔄 Speaker change detected: ${lastSpeaker.current} → ${speakerId}`);
-      finalizeCurrentConversation();
-    }
-    
-    // Update current speaker
-    setCurrentSpeaker(speakerId);
-    lastSpeaker.current = speakerId;
-    
-    if (isFinal) {
-      // Set segment start time if this is a new segment
-      if (conversationAccumulator.current === '' && currentSegmentStartTime.current === 0) {
-        currentSegmentStartTime.current = Date.now();
-      }
-      
-      // For final results, add to the accumulator with proper spacing
-      const cleanTranscript = transcript.trim();
-      if (conversationAccumulator.current) {
-        // Add space if the accumulator doesn't end with punctuation
-        const lastChar = conversationAccumulator.current.slice(-1);
-        const needsSpace = !['.', '!', '?', ','].includes(lastChar);
-        conversationAccumulator.current += (needsSpace ? ' ' : '') + cleanTranscript;
-      } else {
-        conversationAccumulator.current = cleanTranscript;
-      }
-      
-      // Update the current conversation display
-      setCurrentConversation(conversationAccumulator.current);
-      
-      // Set a timer to finalize after silence (4 seconds for better UX)
-      clearSilenceTimer();
-      silenceTimer.current = setTimeout(() => {
-        // Double-check if enough time has passed since last transcript
-        if (Date.now() - lastTranscriptTime.current >= 3500) {
-          finalizeCurrentConversation();
-        }
-      }, 4000);
-      
-      // Set a timer to finalize after a long continuous speech (e.g., 15 seconds)
-      clearLongSpeechTimer();
-      longSpeechTimer.current = setTimeout(() => {
-        // Only finalize if the current segment has been accumulating for a while
-        if (Date.now() - currentSegmentStartTime.current >= 14500) { // 14.5 seconds
-          finalizeCurrentConversation();
-        }
-      }, 15000); // Check every 15 seconds
-      
-    } else {
-      // For interim results, show the accumulated text + current interim
-      const cleanTranscript = transcript.trim();
-      let displayText = conversationAccumulator.current;
-      
-      if (displayText && cleanTranscript) {
-        // Add space if needed
-        const lastChar = displayText.slice(-1);
-        const needsSpace = !['.', '!', '?', ','].includes(lastChar);
-        displayText += (needsSpace ? ' ' : '') + cleanTranscript;
-      } else if (cleanTranscript) {
-        displayText = cleanTranscript;
-      }
-      
-      setCurrentConversation(displayText);
+      return 'opportunity';
     }
   };
-
-  // Analyze message
-  const analyzeMessage = async (text: string, speakerId: number, messageId: string) => {
-    try {
-      const res = await fetch('/api/transcribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript: text, speakerId }),
-      });
-      
-      if (res.ok) {
-        const data = await res.json();
-        if (data.analysis && data.analysis.trim()) {
-          const parsedAnalysis = parseAnalysis(data.analysis, messageId, speakerId);
-          setInsights(prev => [...parsedAnalysis, ...prev]);
-          
-          // Store insights in database if we have an active call
-          if (currentCallId && parsedAnalysis.length > 0) {
-            for (const insight of parsedAnalysis) {
-              await CallsService.addInsight({
-                call_id: currentCallId,
-                type: insight.type,
-                content: insight.content,
-                timestamp_offset: Math.floor((insight.timestamp - callStartTime) / 1000)
-              });
-
-              // Notify desktop app of new insight via Ably
-              try {
-                if (controlChannel.current) {
-                  await controlChannel.current.publish('insight-generated', {
-                    content: insight.content,
-                    insightType: insight.type,
-                    timestamp: Date.now()
-                  });
-                }
-              } catch (error) {
-                console.error('Error notifying desktop of insight via Ably:', error);
-              }
-            }
-          }
-        }
-      }
-    } catch (e) {
-      console.error('Analysis error:', e);
+  
+  // Get insight title based on type
+  const getInsightTitle = (type: Insight['type']): string => {
+    switch (type) {
+      case 'objection': return 'Customer Objection';
+      case 'opportunity': return 'Sales Opportunity';
+      case 'buying-signal': return 'Buying Signal Detected';
+      case 'warning': return 'Warning';
+      case 'good-move': return 'Good Move';
+      case 'next-step': return 'Suggested Next Step';
+      default: return 'AI Insight';
     }
   };
-
-  // Create a new call session in the database
-  const createCallSession = async (): Promise<string | null> => {
-    console.log('🔐 ENHANCED LOGGING: createCallSession called');
-    console.log('🔐 ENHANCED LOGGING: Auth loading state:', loading);
-    console.log('🔐 ENHANCED LOGGING: User exists:', !!user);
-    
-    if (loading) {
-      console.log('⚠️ ENHANCED LOGGING: Authentication still loading, cannot create call session yet');
-      toast({
-        variant: 'destructive',
-        title: 'Authentication loading',
-        description: 'Please wait for the authentication to complete before starting a call.'
-      });
-      return null;
-    }
-
-    if (!user) {
-      console.log('⚠️ ENHANCED LOGGING: No authenticated user, cannot create call session');
-      toast({
-        variant: 'destructive',
-        title: 'Authentication required',
-        description: 'Please log in to start a call session.'
-      });
-      return null;
-    }
-
-    try {
-      console.log('🔐 ENHANCED LOGGING: Creating call with user ID:', user.id);
-      const call = await CallsService.createCall({
-        user_id: user.id,
-        customer_name: pendingDesktopStart ? 'Desktop Zoom Call' : 'Live Call Session',
-        status: 'active'
-      });
-
-      if (call) {
-        console.log('✅ Created call session:', call.id);
-        
-        // Notify desktop app of call start via Ably
-        try {
-          if (controlChannel.current) {
-            await controlChannel.current.publish('call-status-update', {
-              status: 'started',
-              callId: call.id,
-              timestamp: Date.now()
-            });
-          }
-        } catch (error) {
-          console.error('Error notifying desktop of call start via Ably:', error);
-        }
-        
-        return call.id;
-      } else {
-        throw new Error('Failed to create call session');
-      }
-    } catch (error) {
-      console.error('❌ Error creating call session:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Database error',
-        description: 'Failed to create call session. Please try again.'
-      });
-      return null;
-    }
-  };
-
-  // End the call session in the database
-  const endCallSession = async (callId: string) => {
-    try {
-      await CallsService.endCall(callId);
-      console.log('✅ Ended call session:', callId);
-      
-      // Notify desktop app of call end via Ably
-      try {
-        if (controlChannel.current) {
-          await controlChannel.current.publish('call-status-update', {
-            status: 'ended',
-            callId: callId,
-            timestamp: Date.now()
-          });
-        }
-      } catch (error) {
-        console.error('Error notifying desktop of call end via Ably:', error);
-      }
-    } catch (error) {
-      console.error('❌ Error ending call session:', error);
-    }
-  };
-
-  // Connect to Ably and set up channels
-  async function connectWithRetry(deepgramApiKey?: string, mimeType?: string) {
-    console.log('🔗 ENHANCED LOGGING: connectWithRetry function entered');
-    console.log('🔗 ENHANCED LOGGING: Starting connectWithRetry function with Ably');
-    console.log('🔗 ENHANCED LOGGING: Current state:', { live, connecting });
-    console.log('🔗 ENHANCED LOGGING: Deepgram API key provided:', !!deepgramApiKey);
-    console.log('🔗 ENHANCED LOGGING: MIME type provided:', mimeType);
-    
-    const ablyApiKey = process.env.NEXT_PUBLIC_ABLY_API_KEY;
-    
-    // CRITICAL FIX: Use the provided deepgramApiKey parameter or fallback to environment
-    const finalDeepgramApiKey = deepgramApiKey || process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
-    
-    console.log('🔑 ENHANCED LOGGING: Ably API key check - Present:', !!ablyApiKey);
-    console.log('🔑 ENHANCED LOGGING: Final Deepgram API key check - Present:', !!finalDeepgramApiKey);
-    
-    if (!ablyApiKey) {
-      console.log('❌ ENHANCED LOGGING: No Ably API key found');
-      toast({
-        variant: 'destructive',
-        title: 'Configuration Error',
-        description: 'Ably API key is not configured.'
-      });
-      return;
-    }
-
-    if (!finalDeepgramApiKey) {
-      console.log('❌ ENHANCED LOGGING: No Deepgram API key found');
-      toast({
-        variant: 'destructive',
-        title: 'Configuration Error',
-        description: 'Deepgram API key is not configured.'
-      });
-      return;
-    }
-
-    // Check authentication state before proceeding
-    if (loading) {
-      console.log('⏳ ENHANCED LOGGING: Authentication still loading, waiting...');
-      toast({
-        variant: 'destructive',
-        title: 'Authentication loading',
-        description: 'Please wait for the authentication to complete before starting a call.'
-      });
-      return;
-    }
-
-    if (!user) {
-      console.log('❌ ENHANCED LOGGING: No authenticated user, cannot proceed');
-      toast({
-        variant: 'destructive',
-        title: 'Authentication required',
-        description: 'Please log in to start a call session.'
-      });
-      return;
-    }
-
-    // Create call session in database
-    console.log('🔗 ENHANCED LOGGING: Creating call session in database...');
-    const callId = await createCallSession();
-    if (!callId) {
-      console.log('❌ ENHANCED LOGGING: Failed to create call session, aborting');
-      return; // Error already shown in createCallSession
-    }
-    setCurrentCallId(callId);
-    setCallStartTime(Date.now());
-
-    try {
-      setConnecting(true);
-      
-      // Initialize Ably client
-      console.log('🔗 ENHANCED LOGGING: Initializing Ably client...');
-      const client = new Ably.Realtime({
-        key: ablyApiKey,
-        clientId: `webapp-${Date.now()}`,
-      });
-      
-      ablyClient.current = client;
-
-      // Wait for Ably connection
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Ably connection timeout'));
-        }, 10000);
-
-        client.connection.on('connected', () => {
-          clearTimeout(timeout);
-          console.log('✅ ENHANCED LOGGING: Connected to Ably successfully');
-          resolve();
-        });
-
-        client.connection.on('failed', (error) => {
-          clearTimeout(timeout);
-          console.error('❌ ENHANCED LOGGING: Ably connection failed:', error);
-          reject(error);
-        });
-      });
-
-      // Set up channels
-      console.log('🔗 ENHANCED LOGGING: Setting up Ably channels...');
-      controlChannel.current = client.channels.get('closeflow:desktop-control');
-      resultsChannel.current = client.channels.get('closeflow:deepgram-results');
-
-      // Subscribe to Deepgram results
-      resultsChannel.current.subscribe((message) => {
-        console.log('📨 ENHANCED LOGGING: Received message from Ably:', message.name);
-        
-        try {
-          if (message.name === 'deepgram-result' && message.data?.data) {
-            const deepgramResult = message.data.data;
-            
-            if (deepgramResult.type === 'Results' && deepgramResult.channel?.alternatives?.[0]?.transcript) {
-              const transcript = deepgramResult.channel.alternatives[0].transcript;
-              const isFinal = deepgramResult.is_final || false;
-              
-              // Try to get speaker from words array
-              let speakerId = undefined;
-              const words = deepgramResult.channel.alternatives[0].words;
-              if (words && words.length > 0) {
-                const speakerCounts = new Map();
-                words.forEach((word: any) => {
-                  if (word.speaker !== undefined) {
-                    speakerCounts.set(word.speaker, (speakerCounts.get(word.speaker) || 0) + 1);
-                  }
-                });
-                
-                if (speakerCounts.size > 0) {
-                  let maxCount = 0;
-                  for (const [speaker, count] of speakerCounts.entries()) {
-                    if (count > maxCount) {
-                      maxCount = count;
-                      speakerId = speaker;
-                    }
-                  }
-                }
-              }
-              
-              handleTranscript(transcript, isFinal, speakerId);
-            }
-          } else if (message.name === 'deepgram-connected') {
-            console.log('✅ ENHANCED LOGGING: Deepgram connected via Ably');
-            setDeepgramConnected(true);
-            
-            toast({
-              title: 'Transcription Ready',
-              description: 'Connected to Deepgram transcription service via Ably.'
-            });
-          } else if (message.name === 'deepgram-error') {
-            console.error('❌ ENHANCED LOGGING: Deepgram error via Ably:', message.data?.error);
-            setDeepgramConnected(false);
-            
-            toast({
-              variant: 'destructive',
-              title: 'Transcription Error',
-              description: 'Failed to connect to transcription service: ' + message.data?.error
-            });
-          } else if (message.name === 'deepgram-disconnected') {
-            console.log('⚠️ ENHANCED LOGGING: Deepgram disconnected via Ably:', message.data?.closeCode, message.data?.closeReason);
-            setDeepgramConnected(false);
-            
-            if (message.data?.closeCode === 1011) {
-              toast({
-                variant: 'destructive',
-                title: 'Transcription Timeout',
-                description: 'Deepgram connection timed out. This may be due to no audio being detected.'
-              });
-            }
-          }
-        } catch (error) {
-          console.error('❌ ENHANCED LOGGING: Error processing Ably message:', error);
-        }
-      });
-
-      // Send start transcription command to desktop app
-      console.log('🔗 ENHANCED LOGGING: Sending start-transcription command via Ably...');
-      console.log('🔑 ENHANCED LOGGING: Deepgram API key being sent from web app:', !!finalDeepgramApiKey);
-      console.log('🎤 ENHANCED LOGGING: MIME type being sent:', mimeType);
-      
-      await controlChannel.current.publish('start-transcription', {
-        deepgramApiKey: finalDeepgramApiKey,
-        mimeType: mimeType, // Include MIME type from desktop
-        timestamp: Date.now()
-      });
-
-      console.log('✅ ENHANCED LOGGING: Start transcription command sent via Ably');
-      
-      setLive(true);
-      setConnecting(false);
-      setMessages([]);
-      setInsights([]);
-      setCurrentConversation('');
-      setCurrentSpeaker(null);
-      conversationAccumulator.current = '';
-      lastSpeaker.current = null;
-      clearSilenceTimer();
-      clearLongSpeechTimer();
-      currentSegmentStartTime.current = 0;
-      
-      // NEW: Send confirmation to desktop app
-      try {
-        await fetch('/api/desktop-sync', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            type: 'web-app-call-started-confirmation',
-            timestamp: Date.now()
-          })
-        });
-        console.log('✅ ENHANCED LOGGING: Sent call started confirmation to desktop');
-      } catch (error) {
-        console.error('❌ ENHANCED LOGGING: Error sending confirmation to desktop:', error);
-      }
-      
-      toast({
-        title: 'Call Analysis Started',
-        description: 'Connected to desktop app via Ably. Transcription is active.'
-      });
-
-    } catch (err) {
-      console.error('❌ ENHANCED LOGGING: Ably connection error:', err);
-      setConnecting(false);
-      stopLive();
-      
-      // End call session if it was created
-      if (currentCallId) {
-        endCallSession(currentCallId);
-        setCurrentCallId(null);
-      }
-      
-      toast({
-        variant: 'destructive',
-        title: 'Connection Error',
-        description: 'Failed to connect to desktop app via Ably. Please try again.'
-      });
-    }
-  }
-
-  const startLive = async (triggeredByDesktop = false, deepgramApiKey?: string, mimeType?: string) => {
-    console.log('🎯 ENHANCED LOGGING: startLive function entered');
-    console.log('🎯 ENHANCED LOGGING: startLive function called');
-    console.log('🎯 ENHANCED LOGGING: triggeredByDesktop:', triggeredByDesktop);
-    console.log('🎯 ENHANCED LOGGING: Current state:', { live, connecting });
-    console.log('🎯 ENHANCED LOGGING: Deepgram API key provided:', !!deepgramApiKey);
-    console.log('🎯 ENHANCED LOGGING: MIME type provided:', mimeType);
-    
-    // Check authentication state before proceeding
-    if (loading) {
-      console.log('⏳ ENHANCED LOGGING: Authentication still loading, cannot start call');
-      
-      toast({
-        variant: 'destructive',
-        title: 'Authentication loading',
-        description: 'Please wait for the authentication to complete before starting a call.'
-      });
-      return;
-    }
-
-    if (!user) {
-      console.log('❌ ENHANCED LOGGING: No authenticated user, cannot start call');
-      
-      toast({
-        variant: 'destructive',
-        title: 'Authentication required',
-        description: 'Please log in to start a call session.'
-      });
-      return;
-    }
-    
-    // For desktop-triggered calls, we don't need microphone access
-    // The desktop app will handle audio capture via system audio
-    if (!triggeredByDesktop) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          audio: { 
-            channelCount: 1, 
-            sampleRate: 48000, // CRITICAL FIX: Changed from 16000 to 48000 Hz for Opus compatibility
-            echoCancellation: true,
-            noiseSuppression: true
-          } 
-        });
-
-        const recorder = new MediaRecorder(stream, {
-          mimeType: 'audio/webm;codecs=opus',
-        });
-        recorderRef.current = recorder;
-
-        recorder.ondataavailable = (e) => {
-          // Note: For Ably integration, audio data would need to be sent via Ably channels
-          // This is currently handled by the desktop app
-          console.log('🎤 Audio data available (handled by desktop app via Ably)');
-        };
-      } catch (err) {
-        console.error('Failed to start recording:', err);
-        toast({
-          variant: 'destructive',
-          title: 'Microphone error',
-          description: 'Please check your microphone permissions'
-        });
-        return;
-      }
-    } else {
-      console.log('🎯 ENHANCED LOGGING: Desktop triggered - skipping microphone setup');
-    }
-
-    console.log('🎯 ENHANCED LOGGING: About to call connectWithRetry');
-    // CRITICAL FIX: Pass the Deepgram API key and MIME type to connectWithRetry
-    await connectWithRetry(deepgramApiKey, mimeType);
-    console.log('🎯 ENHANCED LOGGING: connectWithRetry completed');
-  };
-
-  const stopLive = () => {
-    console.log('🛑 ENHANCED LOGGING: stopLive function called');
-    console.log('🛑 ENHANCED LOGGING: Current state:', { live, connecting });
-    
-    clearLongSpeechTimer();
-    clearSilenceTimer();
-    finalizeCurrentConversation();
-
-    const rec = recorderRef.current;
-    if (rec && rec.state !== 'inactive') {
-      rec.stop();
-      rec.stream.getTracks().forEach(t => t.stop());
-      recorderRef.current = undefined;
-    }
-    
-    // NEW: Send confirmation to desktop app before stopping
-    if (live) {
-      try {
-        fetch('/api/desktop-sync', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            type: 'web-app-call-stopped-confirmation',
-            timestamp: Date.now()
-          })
-        }).then(() => {
-          console.log('✅ ENHANCED LOGGING: Sent call stopped confirmation to desktop');
-        }).catch(error => {
-          console.error('❌ ENHANCED LOGGING: Error sending stop confirmation to desktop:', error);
-        });
-      } catch (error) {
-        console.error('❌ ENHANCED LOGGING: Error sending stop confirmation to desktop:', error);
-      }
-    }
-    
-    // Send stop transcription command via Ably
-    if (controlChannel.current) {
-      console.log('🛑 ENHANCED LOGGING: Sending stop-transcription command via Ably...');
-      controlChannel.current.publish('stop-transcription', {
-        timestamp: Date.now()
-      }).catch(error => {
-        console.error('Error sending stop command via Ably:', error);
-      });
-    }
-    
-    // Close Ably connection
-    if (ablyClient.current) {
-      console.log('🛑 ENHANCED LOGGING: Closing Ably connection...');
-      ablyClient.current.close();
-      ablyClient.current = null;
-    }
-    
-    controlChannel.current = null;
-    resultsChannel.current = null;
-    
-    setLive(false);
-    setConnecting(false);
-    setDeepgramConnected(false);
-    
-    // CRITICAL: Signal to parent that desktop call is no longer active
-    if (onDesktopCallStateChange) {
-      onDesktopCallStateChange(false);
-    }
-    
-    // Show feedback modal if we have a call session
-    if (currentCallId) {
-      setShowFeedbackModal(true);
-    }
-    
-    console.log('🛑 ENHANCED LOGGING: stopLive completed');
-  };
-
-  const handleFeedbackModalClose = () => {
-    setShowFeedbackModal(false);
-    setCurrentCallId(null);
-    setCallStartTime(0);
-    
-    // Trigger refresh in parent component
-    if (onCallEnd) {
-      onCallEnd();
-    }
-  };
-
-  const parseAnalysis = (analysisText: string, messageId: string, speakerId: number): Analysis[] => {
-    const insights = [];
-    
-    // Enhanced parsing for different coaching categories
-    if (analysisText.includes('🚨') || analysisText.toLowerCase().includes('objection')) {
-      insights.push({
-        type: 'objection' as const,
-        content: analysisText,
-        timestamp: Date.now(),
-        messageId,
-        speakerId
-      });
-    } else if (analysisText.includes('💡') || analysisText.toLowerCase().includes('opportunity')) {
-      insights.push({
-        type: 'opportunity' as const,
-        content: analysisText,
-        timestamp: Date.now(),
-        messageId,
-        speakerId
-      });
-    } else if (analysisText.includes('🎯') || analysisText.toLowerCase().includes('buying signal')) {
-      insights.push({
-        type: 'buying-signal' as const,
-        content: analysisText,
-        timestamp: Date.now(),
-        messageId,
-        speakerId
-      });
-    } else if (analysisText.includes('⚠️') || analysisText.toLowerCase().includes('warning')) {
-      insights.push({
-        type: 'warning' as const,
-        content: analysisText,
-        timestamp: Date.now(),
-        messageId,
-        speakerId
-      });
-    } else if (analysisText.includes('✅') || analysisText.toLowerCase().includes('good move')) {
-      insights.push({
-        type: 'good-move' as const,
-        content: analysisText,
-        timestamp: Date.now(),
-        messageId,
-        speakerId
-      });
-    } else if (analysisText.includes('🔄') || analysisText.toLowerCase().includes('next step')) {
-      insights.push({
-        type: 'next-step' as const,
-        content: analysisText,
-        timestamp: Date.now(),
-        messageId,
-        speakerId
-      });
-    } else {
-      // Default to opportunity for general coaching advice
-      insights.push({
-        type: 'opportunity' as const,
-        content: analysisText,
-        timestamp: Date.now(),
-        messageId,
-        speakerId
-      });
-    }
-    
-    return insights;
-  };
-
-  const getInsightIcon = (type: Analysis['type']) => {
+  
+  // Get insight icon based on type
+  const getInsightIcon = (type: Insight['type']) => {
     switch (type) {
       case 'objection': return <AlertTriangle className="h-4 w-4 text-red-500" />;
       case 'opportunity': return <Lightbulb className="h-4 w-4 text-blue-500" />;
       case 'buying-signal': return <Target className="h-4 w-4 text-green-500" />;
       case 'warning': return <AlertCircle className="h-4 w-4 text-orange-500" />;
-      case 'good-move': return <CheckCircle2 className="h-4 w-4 text-emerald-500" />;
+      case 'good-move': return <CheckCircle className="h-4 w-4 text-emerald-500" />;
       case 'next-step': return <TrendingUp className="h-4 w-4 text-purple-500" />;
+      default: return <Brain className="h-4 w-4 text-gray-500" />;
     }
   };
-
-  const getInsightClass = (type: Analysis['type']) => {
-    switch (type) {
-      case 'objection': return 'border-red-200 bg-red-50 dark:bg-red-900/20';
-      case 'opportunity': return 'border-blue-200 bg-blue-50 dark:bg-blue-900/20';
-      case 'buying-signal': return 'border-green-200 bg-green-50 dark:bg-green-900/20';
-      case 'warning': return 'border-orange-200 bg-orange-50 dark:bg-orange-900/20';
-      case 'good-move': return 'border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20';
-      case 'next-step': return 'border-purple-200 bg-purple-50 dark:bg-purple-900/20';
-    }
+  
+  // Format timestamp
+  const formatTimestamp = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
-
-  const getInsightLabel = (type: Analysis['type']) => {
-    switch (type) {
-      case 'objection': return 'Objection Alert';
-      case 'opportunity': return 'Opportunity';
-      case 'buying-signal': return 'Buying Signal';
-      case 'warning': return 'Warning';
-      case 'good-move': return 'Good Move';
-      case 'next-step': return 'Next Step';
-    }
+  
+  // Handle feedback modal close
+  const handleFeedbackClose = () => {
+    setShowFeedback(false);
+    setCallId(null);
+    setTranscripts([]);
+    setInsights([]);
   };
-
-  const getSpeakerColors = (speakerId: number) => {
-    return SPEAKER_COLORS[speakerId % SPEAKER_COLORS.length];
-  };
-
-  // Render message bubble
-  const renderMessageBubble = (message: Message) => {
-    const colors = getSpeakerColors(message.speakerId);
-    const isRightSide = colors.side === 'right';
-    
-    return (
-      <div
-        key={message.id}
-        className={cn(
-          "flex items-start gap-3 mb-4 max-w-[85%]",
-          isRightSide ? "ml-auto flex-row-reverse" : "mr-auto"
-        )}
-      >
-        <div className={cn(
-          "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium",
-          colors.bg,
-          colors.text
-        )}>
-          {message.speakerId + 1}
-        </div>
-        
-        <div className={cn(
-          "rounded-2xl px-4 py-3 shadow-sm",
-          isRightSide 
-            ? "bg-primary text-primary-foreground rounded-br-md" 
-            : cn(colors.lightBg, colors.darkBg, "border rounded-bl-md")
-        )}>
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-medium opacity-70">
-              {colors.name}
-            </span>
-            <span className="text-xs opacity-50">
-              {new Date(message.timestamp).toLocaleTimeString([], { 
-                hour: '2-digit', 
-                minute: '2-digit' 
-              })}
-            </span>
-          </div>
-          <p className="text-sm leading-relaxed break-words">
-            {message.text}
-          </p>
-        </div>
-      </div>
-    );
-  };
-
-  // Render current conversation being built
-  const renderCurrentConversation = () => {
-    if (!currentConversation || currentSpeaker === null) return null;
-    
-    const colors = getSpeakerColors(currentSpeaker);
-    const isRightSide = colors.side === 'right';
-    
-    return (
-      <div className={cn(
-        "flex items-start gap-3 mb-4 max-w-[85%] opacity-90",
-        isRightSide ? "ml-auto flex-row-reverse" : "mr-auto"
-      )}>
-        <div className={cn(
-          "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium",
-          colors.bg,
-          colors.text
-        )}>
-          {currentSpeaker + 1}
-        </div>
-        
-        <div className={cn(
-          "rounded-2xl px-4 py-3 shadow-sm border-2 border-dashed",
-          isRightSide 
-            ? "bg-primary/10 text-primary border-primary/30 rounded-br-md" 
-            : cn(colors.lightBg, colors.darkBg, "border-gray-300 rounded-bl-md")
-        )}>
-          <div className="flex items-center justify-between mb-1">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-medium opacity-70">
-                {colors.name} is speaking...
-              </span>
-              <div className="flex gap-1">
-                <div className="w-1 h-1 bg-current rounded-full animate-bounce" />
-                <div className="w-1 h-1 bg-current rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
-                <div className="w-1 h-1 bg-current rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
-              </div>
-            </div>
-          </div>
-          <p className="text-sm leading-relaxed break-words">
-            {currentConversation}
-          </p>
-        </div>
-      </div>
-    );
-  };
-
-  // Get call data for feedback modal
-  const getCallDataForFeedback = () => {
-    if (!currentCallId) return { transcripts: [], insights: [] };
-    
-    const transcripts = messages.map(msg => ({
-      id: msg.id,
-      speaker_name: getSpeakerColors(msg.speakerId).name,
-      content: msg.text,
-      timestamp_offset: Math.floor((msg.timestamp - callStartTime) / 1000)
-    }));
-
-    const insightData = insights.map(insight => ({
-      id: insight.messageId || '',
-      type: insight.type,
-      content: insight.content,
-      timestamp_offset: Math.floor((insight.timestamp - callStartTime) / 1000)
-    }));
-
-    return { transcripts, insights: insightData };
-  };
-
-  useEffect(() => () => stopLive(), []);
-
-  // Render authentication loading state
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center p-8 h-[400px]">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
-        <h3 className="text-lg font-medium mb-2">Authentication loading</h3>
-        <p className="text-muted-foreground text-center max-w-md">
-          Please wait for the authentication to complete before starting a call.
-        </p>
-      </div>
-    );
-  }
-
-  // Render authentication required state
-  if (!user) {
-    return (
-      <div className="flex flex-col items-center justify-center p-8 h-[400px]">
-        <AlertTriangle className="h-12 w-12 text-amber-500 mb-4" />
-        <h3 className="text-lg font-medium mb-2">Authentication Required</h3>
-        <p className="text-muted-foreground text-center max-w-md">
-          Please log in to start a call session.
-        </p>
-      </div>
-    );
-  }
-
+  
   return (
     <>
-      <div className="space-y-6">
-        <div className="mb-6 flex items-center justify-between">
-          <Button
-            onClick={live ? stopLive : () => startLive()}
-            variant={live ? 'destructive' : 'default'}
-            disabled={connecting}
-          >
-            {connecting ? (
-              'Connecting...'
-            ) : live ? (
-              <>
-                <MicOff className="h-4 w-4 mr-2" /> End Call
-              </>
-            ) : (
-              <>
-                <Mic className="h-4 w-4 mr-2" /> Start Live
-              </>
-            )}
-          </Button>
-          
-          <div className="flex items-center gap-4">
-            <div className={cn(
-              "text-sm flex items-center gap-2",
-              desktopConnected ? "text-green-600" : "text-red-600"
-            )}>
-              <div className={cn(
-                "w-2 h-2 rounded-full",
-                desktopConnected ? "bg-green-500 animate-pulse" : "bg-red-500"
-              )}></div>
-              Desktop {desktopConnected ? 'Connected' : 'Disconnected'}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Transcript Column */}
+        <Card>
+          <div className="p-4 border-b flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <MessageSquare className="h-5 w-5 text-primary" />
+              <h3 className="font-semibold">Live Transcript</h3>
             </div>
-            
-            <div className={cn(
-              "text-sm flex items-center gap-2",
-              deepgramConnected ? "text-green-600" : "text-yellow-600"
-            )}>
-              <div className={cn(
-                "w-2 h-2 rounded-full",
-                deepgramConnected ? "bg-green-500 animate-pulse" : "bg-yellow-500"
-              )}></div>
-              Transcription {deepgramConnected ? 'Active' : 'Connecting...'}
+            <div className="flex items-center gap-2">
+              <Badge variant="outline">
+                {formatTimestamp(elapsedTime)}
+              </Badge>
+              <Button 
+                variant="destructive" 
+                size="sm"
+                onClick={stopLive}
+                disabled={isEndingCall || !isLive}
+              >
+                {isEndingCall ? "Ending..." : "End Call"}
+              </Button>
             </div>
-            
-            {pendingDesktopStart && (
-              <div className="text-sm text-muted-foreground flex items-center gap-2">
-                <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></div>
-                Desktop Pending
-              </div>
-            )}
-            {currentCallId && (
-              <div className="text-sm text-muted-foreground">
-                Call ID: {currentCallId.slice(0, 8)}...
-              </div>
-            )}
           </div>
-        </div>
-        
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <MessageSquare className="h-5 w-5" />
-                Live Transcript
-                {messages.length > 0 && (
-                  <span className="text-sm text-muted-foreground">
-                    ({messages.length} message{messages.length > 1 ? 's' : ''})
-                  </span>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ScrollArea className="h-[400px]" ref={scrollRef}>
-                <div className="space-y-2 p-2">
-                  {/* Show current conversation being built at the top */}
-                  {renderCurrentConversation()}
-                  
-                  {messages.length === 0 && !currentConversation && (
-                    <div className="flex items-center justify-center h-32 text-muted-foreground">
-                      <div className="text-center">
-                        <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                        <p className="text-sm">Start speaking to see complete conversation bubbles...</p>
-                        {desktopConnected && (
-                          <p className="text-xs mt-1">Desktop app is connected and ready</p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  
-                  {/* All completed messages (newest first) */}
-                  {messages.map((message) => renderMessageBubble(message))}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
           
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Lightbulb className="h-5 w-5" />
-                Sales Coaching
-                {insights.length > 0 && (
-                  <span className="text-sm text-muted-foreground">
-                    ({insights.length} insight{insights.length > 1 ? 's' : ''})
-                  </span>
+          <ScrollArea className="h-[500px] p-4" ref={scrollRef}>
+            {transcripts.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-8">
+                <MessageSquare className="h-12 w-12 text-muted-foreground mb-4 opacity-50" />
+                <h3 className="text-lg font-semibold mb-2">No transcripts yet</h3>
+                <p className="text-muted-foreground max-w-md">
+                  {isLive 
+                    ? "Waiting for conversation to begin. Start speaking to see the transcript appear here."
+                    : "Start a call to begin transcription and analysis."}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {transcripts.map((transcript) => (
+                  <div key={transcript.id} className="flex gap-3">
+                    <div className={cn(
+                      "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium",
+                      transcript.speaker_id === 0 
+                        ? "bg-blue-500 text-white" 
+                        : "bg-green-500 text-white"
+                    )}>
+                      {transcript.speaker_id === 0 ? 'Y' : 'C'}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm font-medium">
+                          {transcript.speaker_name || `Speaker ${transcript.speaker_id + 1}`}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatTimestamp(transcript.timestamp_offset)}
+                        </span>
+                      </div>
+                      <p className="text-sm leading-relaxed">{transcript.content}</p>
+                    </div>
+                  </div>
+                ))}
+                
+                {/* Loading indicator for new transcripts */}
+                {isProcessing && (
+                  <div className="flex items-center justify-center py-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                    <span className="ml-2 text-xs text-muted-foreground">Processing...</span>
+                  </div>
                 )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ScrollArea className="h-[400px]">
-                <div className="space-y-3">
-                  {insights.length === 0 && (
-                    <div className="flex items-center justify-center h-32 text-muted-foreground">
-                      <div className="text-center">
-                        <Lightbulb className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                        <p className="text-sm">AI sales coaching will appear here...</p>
-                        {desktopConnected && (
-                          <p className="text-xs mt-1">Insights will be shared with desktop app</p>
-                        )}
+              </div>
+            )}
+          </ScrollArea>
+        </Card>
+        
+        {/* Insights Column */}
+        <Card>
+          <div className="p-4 border-b flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Brain className="h-5 w-5 text-primary" />
+              <h3 className="font-semibold">AI Insights</h3>
+            </div>
+            <Badge variant="outline">
+              {insights.length} insights
+            </Badge>
+          </div>
+          
+          <ScrollArea className="h-[500px] p-4">
+            {insights.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-8">
+                <Brain className="h-12 w-12 text-muted-foreground mb-4 opacity-50" />
+                <h3 className="text-lg font-semibold mb-2">No insights yet</h3>
+                <p className="text-muted-foreground max-w-md">
+                  {isLive 
+                    ? "AI is analyzing your conversation. Insights will appear here as the call progresses."
+                    : "Start a call to receive AI-powered sales coaching insights."}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {insights.map((insight) => (
+                  <div key={insight.id} className="p-4 border rounded-lg">
+                    <div className="flex items-start gap-3">
+                      {getInsightIcon(insight.type)}
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between mb-2">
+                          <Badge variant="outline">
+                            {getInsightTitle(insight.type)}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {formatTimestamp(insight.timestamp_offset)}
+                          </span>
+                        </div>
+                        <p className="text-sm leading-relaxed">{insight.content}</p>
                       </div>
                     </div>
-                  )}
-                  
-                  {insights.map((insight, index) => {
-                    const speakerColors = insight.speakerId !== undefined ? getSpeakerColors(insight.speakerId) : null;
-                    
-                    return (
-                      <div
-                        key={index}
-                        className={cn(
-                          "p-4 border rounded-lg flex items-start gap-3",
-                          getInsightClass(insight.type)
-                        )}
-                      >
-                        {getInsightIcon(insight.type)}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium">
-                                {getInsightLabel(insight.type)}
-                              </span>
-                              {speakerColors && (
-                                <span className={cn(
-                                  "text-xs px-2 py-1 rounded-full",
-                                  speakerColors.bg,
-                                  speakerColors.text
-                                )}>
-                                  {speakerColors.name}
-                                </span>
-                              )}
-                            </div>
-                            <span className="text-xs text-muted-foreground">
-                              {new Date(insight.timestamp).toLocaleTimeString([], { 
-                                hour: '2-digit', 
-                                minute: '2-digit' 
-                              })}
-                            </span>
-                          </div>
-                          <p className="text-sm leading-relaxed">{insight.content}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-        </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </Card>
       </div>
-
+      
       {/* Call Feedback Modal */}
-      {showFeedbackModal && currentCallId && (
+      {showFeedback && callId && (
         <CallFeedbackModal
-          isOpen={showFeedbackModal}
-          onClose={handleFeedbackModalClose}
-          callId={currentCallId}
-          callDuration={Math.floor((Date.now() - callStartTime) / 1000)}
-          {...getCallDataForFeedback()}
+          isOpen={showFeedback}
+          onClose={handleFeedbackClose}
+          callId={callId}
+          callDuration={elapsedTime}
+          transcripts={transcripts}
+          insights={insights}
         />
       )}
     </>
