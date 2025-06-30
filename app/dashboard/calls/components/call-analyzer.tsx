@@ -23,6 +23,7 @@ import { CallFeedbackModal } from '@/components/dashboard/call-feedback-modal';
 import { useAuth } from '@/lib/supabase/hooks';
 import { CallsService } from '@/lib/supabase/calls';
 import { supabase } from '@/lib/supabase/client';
+import { getAblyChannels, isAblyAvailable } from '@/lib/ably/client';
 
 interface CallAnalyzerProps {
   onCallEnd: () => void;
@@ -59,35 +60,32 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
   const [isEndingCall, setIsEndingCall] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
   const [isPollingMessages, setIsPollingMessages] = useState(false);
-  const [lastMessageId, setLastMessageId] = useState<string | null>(null);
+  const [deepgramApiKey, setDeepgramApiKey] = useState<string | null>(null);
+  const [mimeType, setMimeType] = useState<string | null>(null);
   
   // Refs
   const scrollRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const messagePollingRef = useRef<NodeJS.Timeout | null>(null);
   const transcriptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const ablySubscriptionsRef = useRef<any[]>([]);
   
   // Hooks
   const { toast } = useToast();
   const { user } = useAuth();
   
-  // Check if this is a desktop-initiated call
+  // Handle desktop call state changes
   useEffect(() => {
-    console.log('🎯 ENHANCED LOGGING: CallAnalyzer checking desktop initiation');
-    console.log('🎯 ENHANCED LOGGING: Current state:', { isLive, callId, desktopCallActive });
-    console.log('🎯 ENHANCED LOGGING: User authenticated:', !!user);
+    console.log('🎯 ENHANCED LOGGING: CallAnalyzer desktop state change');
+    console.log('🎯 ENHANCED LOGGING: desktopCallActive:', desktopCallActive);
+    console.log('🎯 ENHANCED LOGGING: isLive:', isLive);
     
-    // If desktop call is active and we're not already live, start the call
-    if (desktopCallActive && !isLive && user) {
-      console.log('🎯 ENHANCED LOGGING: Desktop call is active, starting live analysis');
-      startLive();
-    } else if (desktopCallActive && !isLive && !user) {
-      console.log('⏳ ENHANCED LOGGING: Desktop call initiated but authentication still loading');
-    } else if (!desktopCallActive && isLive) {
+    // Only stop if desktop call becomes inactive and we're currently live
+    if (!desktopCallActive && isLive) {
       console.log('🛑 ENHANCED LOGGING: Desktop call stopped, stopping live analysis');
       stopLive();
     }
-  }, [desktopCallActive, isLive, user]);
+  }, [desktopCallActive, isLive]);
   
   // Timer for elapsed time
   useEffect(() => {
@@ -151,13 +149,23 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       if (timerRef.current) clearInterval(timerRef.current);
       if (messagePollingRef.current) clearInterval(messagePollingRef.current);
       if (transcriptTimeoutRef.current) clearTimeout(transcriptTimeoutRef.current);
+      
+      // Clean up Ably subscriptions
+      ablySubscriptionsRef.current.forEach(subscription => {
+        try {
+          subscription.unsubscribe();
+        } catch (error) {
+          console.error('Error unsubscribing from Ably:', error);
+        }
+      });
+      ablySubscriptionsRef.current = [];
     };
   }, []);
   
   // Poll for desktop messages when desktop call is active
   useEffect(() => {
     const pollDesktopMessages = async () => {
-      if (!desktopCallActive || !isLive || isPollingMessages) return;
+      if (!desktopCallActive || isPollingMessages) return;
       
       try {
         setIsPollingMessages(true);
@@ -198,7 +206,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       }
     };
     
-    if (desktopCallActive && isLive) {
+    if (desktopCallActive) {
       // Poll immediately on first activation
       pollDesktopMessages();
       
@@ -218,7 +226,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         messagePollingRef.current = null;
       }
     };
-  }, [desktopCallActive, isLive, isPollingMessages]);
+  }, [desktopCallActive, isPollingMessages]);
   
   // Process messages from desktop app
   const processDesktopMessage = async (message: any) => {
@@ -236,26 +244,17 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         console.log('🚀 ENHANCED LOGGING: Desktop call started message received');
         console.log('🚀 ENHANCED LOGGING: Device settings:', content.deviceSettings);
         
+        // Store the API key and MIME type for later use
+        if (content.deepgramApiKey) {
+          setDeepgramApiKey(content.deepgramApiKey);
+        }
+        if (content.deviceSettings?.mimeType) {
+          setMimeType(content.deviceSettings.mimeType);
+        }
+        
         // If we're not already live, start the call
         if (!isLive && user) {
           await startLive();
-          
-          // Confirm to desktop that we've started
-          try {
-            await fetch('/api/desktop-sync', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                type: 'web-app-call-started-confirmation',
-                timestamp: Date.now()
-              })
-            });
-            console.log('✅ ENHANCED LOGGING: Sent call started confirmation to desktop');
-          } catch (error) {
-            console.error('❌ ENHANCED LOGGING: Error sending call started confirmation:', error);
-          }
         }
         break;
         
@@ -265,23 +264,6 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         // If we're live, stop the call
         if (isLive) {
           await stopLive();
-          
-          // Confirm to desktop that we've stopped
-          try {
-            await fetch('/api/desktop-sync', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                type: 'web-app-call-stopped-confirmation',
-                timestamp: Date.now()
-              })
-            });
-            console.log('✅ ENHANCED LOGGING: Sent call stopped confirmation to desktop');
-          } catch (error) {
-            console.error('❌ ENHANCED LOGGING: Error sending call stopped confirmation:', error);
-          }
         }
         break;
         
@@ -323,70 +305,81 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       setCallId(newCall.id);
       console.log('✅ ENHANCED LOGGING: Created call record:', newCall.id);
       
-      // Set up real-time subscription for transcripts
-      const transcriptSubscription = supabase
-        .channel(`call-transcripts-${newCall.id}`)
-        .on('postgres_changes', {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'call_transcripts',
-          filter: `call_id=eq.${newCall.id}`
-        }, (payload) => {
-          console.log('📝 ENHANCED LOGGING: New transcript received:', payload.new);
+      // If this is a desktop-initiated call, set up Ably communication
+      if (desktopCallActive && isAblyAvailable()) {
+        const channels = getAblyChannels();
+        
+        if (channels && deepgramApiKey && mimeType) {
+          console.log('🔗 ENHANCED LOGGING: Setting up Ably communication for desktop call');
           
-          const newTranscript = payload.new as Transcript;
-          
-          // Only add final transcripts to the UI
-          if (newTranscript.is_final) {
-            setTranscripts(prev => [...prev, newTranscript]);
-            setLastTranscriptTime(Date.now());
-          }
-        })
-        .subscribe();
-      
-      // Set up real-time subscription for insights
-      const insightSubscription = supabase
-        .channel(`call-insights-${newCall.id}`)
-        .on('postgres_changes', {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'ai_insights',
-          filter: `call_id=eq.${newCall.id}`
-        }, (payload) => {
-          console.log('🧠 ENHANCED LOGGING: New insight received:', payload.new);
-          
-          const newInsight = payload.new as Insight;
-          setInsights(prev => [...prev, newInsight]);
-          
-          // Show toast for important insights
-          if (['objection', 'buying-signal', 'warning'].includes(newInsight.type)) {
-            toast({
-              title: getInsightTitle(newInsight.type),
-              description: newInsight.content,
-              variant: newInsight.type === 'warning' ? 'destructive' : 'default'
-            });
-          }
-        })
-        .subscribe();
-      
-      // If this is a desktop-initiated call, notify the desktop app
-      if (desktopCallActive) {
-        try {
-          await fetch('/api/desktop-sync', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              type: 'web-app-call-started-confirmation',
-              callId: newCall.id,
-              timestamp: Date.now()
-            })
+          // Send start-transcription message to desktop
+          await channels.controlChannel.publish('start-transcription', {
+            deepgramApiKey: deepgramApiKey,
+            mimeType: mimeType,
+            callId: newCall.id,
+            timestamp: Date.now()
           });
-          console.log('✅ ENHANCED LOGGING: Sent call started confirmation to desktop');
-        } catch (error) {
-          console.error('❌ ENHANCED LOGGING: Error sending call started confirmation:', error);
+          
+          console.log('✅ ENHANCED LOGGING: Sent start-transcription message to desktop');
+          
+          // Subscribe to Deepgram results from desktop
+          const resultsSubscription = channels.resultsChannel.subscribe((message) => {
+            console.log('📨 ENHANCED LOGGING: Received Deepgram result via Ably:', message.name);
+            handleDeepgramResult(message, newCall.id);
+          });
+          
+          ablySubscriptionsRef.current.push(resultsSubscription);
+          console.log('✅ ENHANCED LOGGING: Subscribed to Deepgram results channel');
         }
+      } else {
+        // Set up regular Supabase real-time subscriptions for manual calls
+        console.log('📡 ENHANCED LOGGING: Setting up Supabase real-time subscriptions');
+        
+        const transcriptSubscription = supabase
+          .channel(`call-transcripts-${newCall.id}`)
+          .on('postgres_changes', {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'call_transcripts',
+            filter: `call_id=eq.${newCall.id}`
+          }, (payload) => {
+            console.log('📝 ENHANCED LOGGING: New transcript received:', payload.new);
+            
+            const newTranscript = payload.new as Transcript;
+            
+            // Only add final transcripts to the UI
+            if (newTranscript.is_final) {
+              setTranscripts(prev => [...prev, newTranscript]);
+              setLastTranscriptTime(Date.now());
+            }
+          })
+          .subscribe();
+        
+        const insightSubscription = supabase
+          .channel(`call-insights-${newCall.id}`)
+          .on('postgres_changes', {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'ai_insights',
+            filter: `call_id=eq.${newCall.id}`
+          }, (payload) => {
+            console.log('🧠 ENHANCED LOGGING: New insight received:', payload.new);
+            
+            const newInsight = payload.new as Insight;
+            setInsights(prev => [...prev, newInsight]);
+            
+            // Show toast for important insights
+            if (['objection', 'buying-signal', 'warning'].includes(newInsight.type)) {
+              toast({
+                title: getInsightTitle(newInsight.type),
+                description: newInsight.content,
+                variant: newInsight.type === 'warning' ? 'destructive' : 'default'
+              });
+            }
+          })
+          .subscribe();
+        
+        ablySubscriptionsRef.current.push(transcriptSubscription, insightSubscription);
       }
       
       setIsLive(true);
@@ -394,11 +387,6 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       setIsInitializing(false);
       
       console.log('✅ ENHANCED LOGGING: Live call analysis started successfully');
-      
-      return () => {
-        transcriptSubscription.unsubscribe();
-        insightSubscription.unsubscribe();
-      };
       
     } catch (error) {
       console.error('❌ ENHANCED LOGGING: Error starting live call analysis:', error);
@@ -425,28 +413,32 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
     try {
       setIsEndingCall(true);
       
-      // End the call in the database
-      await CallsService.endCall(callId, 'pending');
-      
-      // If this is a desktop-initiated call, notify the desktop app
-      if (desktopCallActive) {
-        try {
-          await fetch('/api/desktop-sync', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              type: 'web-app-call-stopped-confirmation',
-              callId: callId,
-              timestamp: Date.now()
-            })
+      // If this is a desktop-initiated call, send stop message via Ably
+      if (desktopCallActive && isAblyAvailable()) {
+        const channels = getAblyChannels();
+        
+        if (channels) {
+          await channels.controlChannel.publish('stop-transcription', {
+            callId: callId,
+            timestamp: Date.now()
           });
-          console.log('✅ ENHANCED LOGGING: Sent call stopped confirmation to desktop');
-        } catch (error) {
-          console.error('❌ ENHANCED LOGGING: Error sending call stopped confirmation:', error);
+          
+          console.log('✅ ENHANCED LOGGING: Sent stop-transcription message to desktop');
         }
       }
+      
+      // Clean up Ably subscriptions
+      ablySubscriptionsRef.current.forEach(subscription => {
+        try {
+          subscription.unsubscribe();
+        } catch (error) {
+          console.error('Error unsubscribing from Ably:', error);
+        }
+      });
+      ablySubscriptionsRef.current = [];
+      
+      // End the call in the database
+      await CallsService.endCall(callId, 'pending');
       
       // Reset state
       setIsLive(false);
@@ -468,6 +460,47 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       onCallEnd();
       
       console.log('🛑 ENHANCED LOGGING: stopLive completed');
+    }
+  };
+  
+  // Handle Deepgram results from Ably
+  const handleDeepgramResult = async (message: any, callId: string) => {
+    try {
+      const { data } = message;
+      
+      if (data.type === 'Results' && data.channel?.alternatives?.[0]?.transcript) {
+        const alternative = data.channel.alternatives[0];
+        const transcript = alternative.transcript.trim();
+        
+        if (transcript && data.is_final) {
+          console.log('📝 ENHANCED LOGGING: Processing final transcript from Deepgram:', transcript);
+          
+          // Determine speaker (simplified logic)
+          const speakerId = 0; // Default to salesperson for now
+          const speakerName = speakerId === 0 ? 'You' : 'Customer';
+          
+          // Create transcript record
+          const newTranscript = await CallsService.addTranscript({
+            call_id: callId,
+            speaker_id: speakerId,
+            speaker_name: speakerName,
+            content: transcript,
+            timestamp_offset: Math.floor(elapsedTime),
+            confidence: alternative.confidence || 0.9,
+            is_final: true
+          });
+          
+          if (newTranscript) {
+            setTranscripts(prev => [...prev, newTranscript]);
+            setLastTranscriptTime(Date.now());
+            
+            // Process for AI insights
+            await processTranscript(newTranscript);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('❌ ENHANCED LOGGING: Error handling Deepgram result:', error);
     }
   };
   
@@ -501,13 +534,26 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         const type = determineInsightType(data.analysis);
         
         // Store insight in database
-        await CallsService.addInsight({
+        const newInsight = await CallsService.addInsight({
           call_id: callId,
           transcript_id: transcript.id,
           type,
           content: data.analysis,
           timestamp_offset: transcript.timestamp_offset
         });
+        
+        if (newInsight) {
+          setInsights(prev => [...prev, newInsight]);
+          
+          // Show toast for important insights
+          if (['objection', 'buying-signal', 'warning'].includes(type)) {
+            toast({
+              title: getInsightTitle(type),
+              description: data.analysis,
+              variant: type === 'warning' ? 'destructive' : 'default'
+            });
+          }
+        }
       }
       
     } catch (error) {
@@ -575,6 +621,8 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
     setCallId(null);
     setTranscripts([]);
     setInsights([]);
+    setDeepgramApiKey(null);
+    setMimeType(null);
   };
   
   return (

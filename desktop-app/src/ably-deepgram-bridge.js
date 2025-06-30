@@ -99,7 +99,7 @@ class AblyDeepgramBridge {
     console.log('✅ ENHANCED LOGGING: Ably channels set up successfully');
   }
 
-  // Update handleControlMessage to extract and use mimeType
+  // Updated handleControlMessage to extract and use mimeType
   handleControlMessage(message) {
     console.log('📨 ENHANCED LOGGING: Received control message:', message.name, message.data);
 
@@ -108,19 +108,19 @@ class AblyDeepgramBridge {
         console.log('🔗 ENHANCED LOGGING: Web app requested transcription start');
         
         this.deepgramApiKey = message.data.deepgramApiKey;
-        const mimeType = message.data.mimeType; // NEW: Extract MIME type
+        const mimeType = message.data.mimeType; // Extract MIME type
         this.transcriptionActive = true;
         
         console.log('🔑 ENHANCED LOGGING: Stored deepgramApiKey:', !!this.deepgramApiKey);
         console.log('🎤 ENHANCED LOGGING: Received MIME type:', mimeType);
         console.log('🔑 ENHANCED LOGGING: Transcription active:', this.transcriptionActive);
         
-        // Always start connection when transcription is requested
-        if (this.transcriptionActive) {
+        // Start connection when transcription is requested
+        if (this.transcriptionActive && this.deepgramApiKey) {
           console.log('🔑 ENHANCED LOGGING: Starting Deepgram connection with MIME type');
-          this.startDeepgramConnection(mimeType); // NEW: Pass MIME type
+          this.startDeepgramConnection(mimeType); // Pass MIME type
         } else {
-          console.error('❌ ENHANCED LOGGING: Transcription not active, cannot start Deepgram connection');
+          console.error('❌ ENHANCED LOGGING: Cannot start Deepgram - missing requirements');
         }
         break;
         
@@ -149,7 +149,8 @@ class AblyDeepgramBridge {
     // Track received chunks
     this.receivedChunkCount++;
 
-    if (this.deepgramReady && this.deepgramConnection && this.deepgramConnection.readyState === WebSocket.OPEN) {
+    // Only send audio if transcription is active AND Deepgram is ready
+    if (this.transcriptionActive && this.deepgramReady && this.deepgramConnection && this.deepgramConnection.readyState === WebSocket.OPEN) {
       // Deepgram is ready, send immediately
       console.log('🎤 ENHANCED LOGGING: Deepgram ready - forwarding audio data immediately');
       try {
@@ -162,8 +163,12 @@ class AblyDeepgramBridge {
         this.scheduleDeepgramReconnect();
       }
     } else {
-      // Deepgram not ready, buffer the audio data
-      this.bufferAudioData(audioData);
+      // Deepgram not ready or transcription not active, buffer the audio data
+      if (this.transcriptionActive) {
+        this.bufferAudioData(audioData);
+      } else {
+        console.log('⚠️ ENHANCED LOGGING: Transcription not active, discarding audio data');
+      }
     }
   }
 
@@ -312,7 +317,7 @@ class AblyDeepgramBridge {
     }
   }
 
-  // Update startDeepgramConnection to accept and use mimeType
+  // Updated startDeepgramConnection to accept and use mimeType
   startDeepgramConnection(mimeType = null) {
     if (!this.deepgramApiKey) {
       console.error('❌ ENHANCED LOGGING: No Deepgram API key provided');
@@ -381,7 +386,7 @@ class AblyDeepgramBridge {
 
     const ws = new WebSocket(dgUrl.toString(), ['token', this.deepgramApiKey]);
     
-    // NEW: Add detailed logging around WebSocket creation and state
+    // Add detailed logging around WebSocket creation and state
     console.log('🔗 ENHANCED LOGGING: WebSocket created, initial readyState:', ws.readyState);
     console.log('🔗 ENHANCED LOGGING: WebSocket.CONNECTING =', WebSocket.CONNECTING);
     console.log('🔗 ENHANCED LOGGING: WebSocket.OPEN =', WebSocket.OPEN);
@@ -521,7 +526,7 @@ class AblyDeepgramBridge {
       }
     });
     
-    // NEW: Add timeout to detect if no events fire
+    // Add timeout to detect if no events fire
     setTimeout(() => {
       if (ws.readyState === WebSocket.CONNECTING) {
         console.log('⚠️ ENHANCED LOGGING: WebSocket still connecting after 5 seconds, readyState:', ws.readyState);

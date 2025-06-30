@@ -999,15 +999,26 @@ class CloseFlowDesktop {
         isStoppingCall: this.isStoppingCall
       });
       
-      // Send stop command via Ably instead of HTTP
-      if (this.ablyDeepgramBridge && this.ablyDeepgramBridge.controlChannel) {
-        await this.ablyDeepgramBridge.controlChannel.publish('stop-transcription', {
+      // Send stop command to web app via HTTP POST
+      console.log('🛑 ENHANCED LOGGING: Sending stop request to web app');
+      
+      const response = await fetch(`${this.webAppUrl}/api/desktop-sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'stop-call-analysis',
           timestamp: Date.now()
-        });
+        })
+      });
 
-        console.log('✅ Sent stop-call-analysis message via Ably');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to send stop request to web app');
       }
 
+      console.log('✅ Desktop request to stop call analysis sent to web app');
       this.showNotification('Stopping Analysis', 'Call analysis stopped.');
       
       // The call active state will be updated by checkZoomStatus based on web app status
