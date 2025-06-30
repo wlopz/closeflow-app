@@ -68,6 +68,14 @@ class AblyDeepgramBridge {
       encoding: 'opus',
       container: 'webm'
     };
+    
+    // Track Deepgram message statistics
+    this.messageStats = {
+      totalReceived: 0,
+      byType: {},
+      lastMessageTime: null,
+      hasReceivedResults: false
+    };
   }
 
   async initialize(ablyApiKey) {
@@ -532,6 +540,14 @@ class AblyDeepgramBridge {
       this.deepgramReady = true;
       this.deepgramReconnectAttempts = 0;
       
+      // Reset message statistics
+      this.messageStats = {
+        totalReceived: 0,
+        byType: {},
+        lastMessageTime: Date.now(),
+        hasReceivedResults: false
+      };
+      
       this.sendBufferedAudio();
       this.startDeepgramHeartbeat();
       
@@ -554,13 +570,32 @@ class AblyDeepgramBridge {
       try {
         const message = JSON.parse(data);
         
-        // Only log occasionally to reduce noise
-        if (this.receivedChunkCount % 20 === 0) {
-          console.log('📨 ENHANCED LOGGING: Received message from Deepgram');
-          console.log('📨 ENHANCED LOGGING: Parsed Deepgram message type:', message.type);
+        // Update message statistics
+        this.messageStats.totalReceived++;
+        this.messageStats.lastMessageTime = Date.now();
+        
+        if (!this.messageStats.byType[message.type]) {
+          this.messageStats.byType[message.type] = 0;
+        }
+        this.messageStats.byType[message.type]++;
+        
+        // ENHANCED: Log ALL messages from Deepgram, not just Results
+        console.log('📨 ENHANCED LOGGING: Received message from Deepgram, type:', message.type);
+        console.log('📨 ENHANCED LOGGING: Full message content:', JSON.stringify(message, null, 2));
+        
+        // Log message statistics periodically
+        if (this.messageStats.totalReceived % 10 === 0) {
+          console.log('📊 ENHANCED LOGGING: Deepgram message statistics:');
+          console.log('  - Total messages received:', this.messageStats.totalReceived);
+          console.log('  - Message types:', this.messageStats.byType);
+          console.log('  - Time since first message:', Date.now() - this.messageStats.lastMessageTime, 'ms');
+          console.log('  - Has received Results:', this.messageStats.hasReceivedResults);
         }
         
         if (message.type === 'Results') {
+          // Mark that we've received Results
+          this.messageStats.hasReceivedResults = true;
+          
           // Only log when there's actual transcript content
           if (message.channel?.alternatives?.[0]?.transcript) {
             const alternative = message.channel.alternatives[0];
@@ -591,6 +626,21 @@ class AblyDeepgramBridge {
               }
             }
           }
+        } else if (message.type === 'Metadata') {
+          console.log('📋 ENHANCED LOGGING: Received Metadata from Deepgram:', message);
+        } else if (message.type === 'UtteranceEnd') {
+          console.log('🔚 ENHANCED LOGGING: Received UtteranceEnd from Deepgram:', message);
+        } else if (message.type === 'Error') {
+          console.error('❌ ENHANCED LOGGING: Received Error from Deepgram:', message);
+          
+          // Forward error to web app
+          if (this.resultsChannel) {
+            this.resultsChannel.publish('deepgram-error', {
+              error: message.error || 'Unknown Deepgram error',
+              details: message,
+              timestamp: Date.now()
+            });
+          }
         }
         
         // Forward Deepgram results to web app via Ably
@@ -607,12 +657,14 @@ class AblyDeepgramBridge {
         }
       } catch (error) {
         console.error('❌ ENHANCED LOGGING: Error parsing Deepgram message:', error);
+        console.error('❌ ENHANCED LOGGING: Raw message data:', data.toString().substring(0, 200) + '...');
         
         // Forward error to web app
         if (this.resultsChannel) {
           this.resultsChannel.publish('deepgram-error', {
             error: 'Failed to parse Deepgram message',
             details: error.message,
+            rawData: data.toString().substring(0, 200) + '...',
             timestamp: Date.now()
           });
         }

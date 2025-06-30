@@ -586,10 +586,6 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       // ENHANCED LOGGING: Log the entire message object for debugging
       console.log('🔍 ENHANCED LOGGING: Processing Deepgram result message:', message);
       
-      // CRITICAL FIX: Correctly access the Deepgram data from the Ably message
-      // The Deepgram message is nested under message.data.data
-      const { data } = message;
-      
       // Check if this is a connection status message
       if (message.name === 'deepgram-connected') {
         console.log('🔗 ENHANCED LOGGING: Received Deepgram connected status');
@@ -601,16 +597,25 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         return;
       }
       
+      if (message.name === 'deepgram-error') {
+        console.error('❌ ENHANCED LOGGING: Received Deepgram error:', message.data);
+        
+        // Add to errors state
+        setDeepgramErrors(prev => [...prev, `${message.data.error}: ${message.data.details || 'No details provided'}`]);
+        
+        return;
+      }
+      
       // For actual transcription results
-      if (message.name === 'deepgram-result' && data.data?.type === 'Results' && data.data.channel?.alternatives?.[0]?.transcript) {
-        const alternative = data.data.channel.alternatives[0];
+      if (message.name === 'deepgram-result' && message.data?.data?.type === 'Results' && message.data.data.channel?.alternatives?.[0]?.transcript) {
+        const alternative = message.data.data.channel.alternatives[0];
         const transcript = alternative.transcript.trim();
         
         // MODIFIED: Process all transcripts for debugging, not just final ones
         // if (transcript && data.data.is_final) {
         if (transcript) {
           console.log('📝 ENHANCED LOGGING: Processing transcript from Deepgram:', transcript);
-          console.log('📝 ENHANCED LOGGING: Is final:', data.data.is_final);
+          console.log('📝 ENHANCED LOGGING: Is final:', message.data.data.is_final);
           
           // Determine speaker (simplified logic)
           const speakerId = 0; // Default to salesperson for now
@@ -624,7 +629,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
             content: transcript,
             timestamp_offset: Math.floor(elapsedTime),
             confidence: alternative.confidence || 0.9,
-            is_final: data.data.is_final
+            is_final: message.data.data.is_final
           });
           
           if (newTranscript) {
@@ -632,7 +637,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
             setLastTranscriptTime(Date.now());
             
             // Process for AI insights if it's a final transcript
-            if (data.data.is_final) {
+            if (message.data.data.is_final) {
               await processTranscript(newTranscript);
             }
           }
