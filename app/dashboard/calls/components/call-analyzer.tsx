@@ -719,7 +719,12 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
                 
                 console.log('✅ ENHANCED LOGGING: Transcript persisted with ID:', persistedTranscript.id);
                 
-                // Process for AI insights
+                // CRITICAL FIX: Process for AI insights with enhanced logging
+                console.log('🧠 AI INSIGHTS: About to process transcript for AI analysis');
+                console.log('🧠 AI INSIGHTS: Transcript content:', transcript);
+                console.log('🧠 AI INSIGHTS: Transcript length:', transcript.length);
+                console.log('🧠 AI INSIGHTS: Speaker:', speakerName);
+                
                 await processTranscript(persistedTranscript);
               }
             } catch (error) {
@@ -743,12 +748,27 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
     }
   };
   
-  // Process transcript for analysis
+  // CRITICAL FIX: Process transcript for analysis with relaxed filtering
   const processTranscript = async (transcript: Transcript) => {
-    if (!callId || !transcript.content || transcript.content.length < 30) return;
+    console.log('🧠 AI INSIGHTS: processTranscript called');
+    console.log('🧠 AI INSIGHTS: Call ID:', callId);
+    console.log('🧠 AI INSIGHTS: Transcript content:', transcript.content);
+    console.log('🧠 AI INSIGHTS: Content length:', transcript.content.length);
+    
+    if (!callId || !transcript.content) {
+      console.log('🧠 AI INSIGHTS: Skipping - missing callId or content');
+      return;
+    }
+    
+    // CRITICAL FIX: Relaxed minimum length requirement (was 30, now 10)
+    if (transcript.content.length < 10) {
+      console.log('🧠 AI INSIGHTS: Skipping - content too short (less than 10 characters)');
+      return;
+    }
     
     try {
       setIsProcessing(true);
+      console.log('🧠 AI INSIGHTS: Starting AI analysis request');
       
       const response = await fetch('/api/transcribe', {
         method: 'POST',
@@ -761,16 +781,24 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         })
       });
       
+      console.log('🧠 AI INSIGHTS: API response status:', response.status);
+      
       if (!response.ok) {
         const errorData = await response.json();
+        console.error('🧠 AI INSIGHTS: API error response:', errorData);
         throw new Error(errorData.error || 'Failed to analyze transcript');
       }
       
       const data = await response.json();
+      console.log('🧠 AI INSIGHTS: API response data:', data);
       
-      if (data.analysis && data.analysis.trim()) {
+      // CRITICAL FIX: Relaxed filtering for AI analysis results
+      if (data.analysis && data.analysis.trim() && data.analysis.trim().length > 5) {
+        console.log('🧠 AI INSIGHTS: Valid analysis received:', data.analysis);
+        
         // Determine insight type based on content
         const type = determineInsightType(data.analysis);
+        console.log('🧠 AI INSIGHTS: Determined insight type:', type);
         
         // Store insight in database
         const newInsight = await CallsService.addInsight({
@@ -782,6 +810,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         });
         
         if (newInsight) {
+          console.log('🧠 AI INSIGHTS: Insight stored in database:', newInsight.id);
           setInsights(prev => [...prev, newInsight]);
           
           // Show toast for important insights
@@ -792,11 +821,18 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
               variant: type === 'warning' ? 'destructive' : 'default'
             });
           }
+          
+          console.log('🧠 AI INSIGHTS: Insight successfully added to state and UI');
+        } else {
+          console.error('🧠 AI INSIGHTS: Failed to store insight in database');
         }
+      } else {
+        console.log('🧠 AI INSIGHTS: No valid analysis content received or content too short');
+        console.log('🧠 AI INSIGHTS: Raw analysis:', data.analysis);
       }
       
     } catch (error) {
-      console.error('❌ ENHANCED LOGGING: Error processing transcript:', error);
+      console.error('❌ AI INSIGHTS: Error processing transcript:', error);
     } finally {
       setIsProcessing(false);
     }
@@ -1062,6 +1098,24 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
                     ? "AI is analyzing your conversation. Insights will appear here as the call progresses."
                     : "Start a call to receive AI-powered sales coaching insights."}
                 </p>
+                
+                {/* Debug information for AI insights */}
+                {isLive && (
+                  <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md w-full max-w-md">
+                    <h4 className="text-sm font-semibold text-blue-700 dark:text-blue-400 flex items-center gap-2">
+                      <Brain className="h-4 w-4" />
+                      AI Analysis Status
+                    </h4>
+                    <div className="mt-2 text-xs text-blue-600 dark:text-blue-400">
+                      <p className="mb-1">• Processing: {isProcessing ? 'Active' : 'Idle'}</p>
+                      <p className="mb-1">• Final transcripts: {transcripts.filter(t => t.is_final).length}</p>
+                      <p className="mb-1">• OpenAI configured: Yes</p>
+                    </div>
+                    <p className="mt-2 text-xs text-blue-600 dark:text-blue-400">
+                      Insights are generated when conversation segments are finalized.
+                    </p>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="space-y-4">

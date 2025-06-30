@@ -11,11 +11,12 @@ export async function POST(request: Request) {
   try {
     const { transcript, speakerId }: TranscriptRequest = await request.json();
 
-    console.log('🔍 Received analysis request:', { transcript, speakerId });
+    console.log('🔍 AI INSIGHTS: Received analysis request:', { transcript, speakerId });
+    console.log('🔍 AI INSIGHTS: Transcript length:', transcript.length);
 
     // Validate API key exists
     if (!process.env.OPENAI_API_KEY) {
-      console.error('❌ OpenAI API key not found in environment variables');
+      console.error('❌ AI INSIGHTS: OpenAI API key not found in environment variables');
       return NextResponse.json(
         { error: 'OpenAI API key not configured' },
         { status: 500 }
@@ -40,7 +41,7 @@ RESPONSE GUIDELINES:
 - Provide exact phrases or questions to use when helpful
 - Focus on immediate next steps
 - Keep responses under 100 words for quick reading
-- Only respond when there's meaningful coaching value
+- Provide coaching value for ANY meaningful conversation segment
 
 COACHING CATEGORIES:
 🚨 OBJECTION: Customer raised a concern that needs addressing
@@ -62,7 +63,7 @@ Analyze this statement and provide specific sales coaching. Consider:
 
 Provide tactical coaching advice that can be immediately applied.`;
 
-    console.log('🤖 Sending request to OpenAI...');
+    console.log('🤖 AI INSIGHTS: Sending request to OpenAI...');
 
     try {
       const oaRes = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -83,11 +84,11 @@ Provide tactical coaching advice that can be immediately applied.`;
         }),
       });
 
-      console.log('📊 OpenAI response status:', oaRes.status);
+      console.log('📊 AI INSIGHTS: OpenAI response status:', oaRes.status);
 
       if (!oaRes.ok) {
         const errText = await oaRes.text();
-        console.error(`❌ OpenAI API error: ${oaRes.status} - ${errText}`);
+        console.error(`❌ AI INSIGHTS: OpenAI API error: ${oaRes.status} - ${errText}`);
         
         // Handle specific error cases
         if (oaRes.status === 401) {
@@ -111,19 +112,21 @@ Provide tactical coaching advice that can be immediately applied.`;
       const oaJson = await oaRes.json();
       const analysis = oaJson.choices[0].message.content as string;
 
-      console.log('✅ OpenAI analysis received:', analysis);
+      console.log('✅ AI INSIGHTS: OpenAI analysis received:', analysis);
+      console.log('✅ AI INSIGHTS: Analysis length:', analysis.length);
 
-      // Only return analysis if it's meaningful and contains coaching value
-      if (analysis.toLowerCase().includes('no meaningful feedback') || 
-          analysis.toLowerCase().includes('nothing significant') ||
-          analysis.trim().length < 20) {
+      // CRITICAL FIX: Relaxed filtering - only filter out truly empty responses
+      if (analysis && analysis.trim() && analysis.trim().length > 5) {
+        console.log('✅ AI INSIGHTS: Analysis passed validation, returning to client');
+        return NextResponse.json({ analysis: analysis.trim() });
+      } else {
+        console.log('⚠️ AI INSIGHTS: Analysis too short or empty, returning empty response');
+        console.log('⚠️ AI INSIGHTS: Raw analysis:', JSON.stringify(analysis));
         return NextResponse.json({ analysis: '' });
       }
 
-      return NextResponse.json({ analysis });
-
     } catch (fetchError: any) {
-      console.error('❌ OpenAI API fetch error:', {
+      console.error('❌ AI INSIGHTS: OpenAI API fetch error:', {
         name: fetchError.name,
         message: fetchError.message,
         cause: fetchError.cause,
@@ -132,7 +135,7 @@ Provide tactical coaching advice that can be immediately applied.`;
       
       // Handle specific fetch errors
       if (fetchError.name === 'AbortError') {
-        console.error('❌ OpenAI API request timeout');
+        console.error('❌ AI INSIGHTS: OpenAI API request timeout');
         return NextResponse.json(
           { error: 'Request timeout - please try again' },
           { status: 408 }
@@ -155,7 +158,7 @@ Provide tactical coaching advice that can be immediately applied.`;
     }
 
   } catch (err: any) {
-    console.error('❌ Analyze API error:', err);
+    console.error('❌ AI INSIGHTS: Analyze API error:', err);
     return NextResponse.json(
       { error: err.message || 'Failed to analyze transcript' },
       { status: 500 }
