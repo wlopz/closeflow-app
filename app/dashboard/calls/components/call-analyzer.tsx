@@ -34,11 +34,14 @@ interface CallAnalyzerProps {
 
 interface Transcript {
   id: string;
+  call_id: string;
   speaker_id: number;
   speaker_name: string;
   content: string;
   timestamp_offset: number;
   is_final: boolean;
+  confidence?: number;
+  temp_id?: string; // For tracking interim transcripts before they're persisted
 }
 
 interface Insight {
@@ -572,7 +575,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
     }
   };
   
-  // Handle Deepgram results from Ably
+  // FIXED: Handle Deepgram results from Ably with robust transcript management
   const handleDeepgramResult = async (message: any, callId: string) => {
     try {
       // ENHANCED LOGGING: Log the entire message object for debugging
@@ -602,12 +605,11 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       if (message.name === 'deepgram-result' && message.data?.data?.type === 'Results' && message.data.data.channel?.alternatives?.[0]?.transcript) {
         const alternative = message.data.data.channel.alternatives[0];
         const transcript = alternative.transcript.trim();
+        const isFinal = message.data.data.is_final;
         
-        // MODIFIED: Process all transcripts for debugging, not just final ones
-        // if (transcript && data.data.is_final) {
         if (transcript) {
           console.log('📝 ENHANCED LOGGING: Processing transcript from Deepgram:', transcript);
-          console.log('📝 ENHANCED LOGGING: Is final:', message.data.data.is_final);
+          console.log('📝 ENHANCED LOGGING: Is final:', isFinal);
           
           // FIXED: Extract speaker ID from Deepgram's speaker diarization
           let speakerId = 0; // Default to salesperson
@@ -647,24 +649,81 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
             }
           }
           
-          // Create transcript record with proper speaker information
-          const newTranscript = await CallsService.addTranscript({
-            call_id: callId,
-            speaker_id: speakerId,
-            speaker_name: speakerName,
-            content: transcript,
-            timestamp_offset: Math.floor(elapsedTime),
-            confidence: alternative.confidence || 0.9,
-            is_final: message.data.data.is_final
+          // CRITICAL FIX: Robust transcript state management
+          const tempId = uuidv4(); // Generate temporary ID for interim transcripts
+          
+          setTranscripts(prev => {
+            const newTranscripts = [...prev];
+            
+            // Check if this is an update to an existing interim transcript
+            if (!isFinal && newTranscripts.length > 0) {
+              const lastTranscript = newTranscripts[newTranscripts.length - 1];
+              
+              // If the last transcript is from the same speaker and is not final, update it
+              if (lastTranscript.speaker_id === speakerId && !lastTranscript.is_final) {
+                console.log('🔄 ENHANCED LOGGING: Updating existing interim transcript');
+                lastTranscript.content = transcript;
+                lastTranscript.confidence = alternative.confidence || 0.9;
+                return newTranscripts;
+              }
+            }
+            
+            // Create new transcript entry
+            const newTranscript: Transcript = {
+              id: isFinal ? '' : tempId, // Will be updated with DB ID if final
+              call_id: callId,
+              speaker_id: speakerId,
+              speaker_name: speakerName,
+              content: transcript,
+              timestamp_offset: Math.floor(elapsedTime),
+              confidence: alternative.confidence || 0.9,
+              is_final: isFinal,
+              temp_id: isFinal ? undefined : tempId
+            };
+            
+            console.log('➕ ENHANCED LOGGING: Adding new transcript:', {
+              speaker: speakerName,
+              isFinal,
+              content: transcript.substring(0, 50) + '...'
+            });
+            
+            newTranscripts.push(newTranscript);
+            return newTranscripts;
           });
           
-          if (newTranscript) {
-            setTranscripts(prev => [...prev, newTranscript]);
-            setLastTranscriptTime(Date.now());
-            
-            // Process for AI insights if it's a final transcript
-            if (message.data.data.is_final) {
-              await processTranscript(newTranscript);
+          setLastTranscriptTime(Date.now());
+          
+          // FIXED: Only persist and process final transcripts
+          if (isFinal) {
+            try {
+              // Create transcript record in database
+              const persistedTranscript = await CallsService.addTranscript({
+                call_id: callId,
+                speaker_id: speakerId,
+                speaker_name: speakerName,
+                content: transcript,
+                timestamp_offset: Math.floor(elapsedTime),
+                confidence: alternative.confidence || 0.9,
+                is_final: true
+              });
+              
+              if (persistedTranscript) {
+                // Update the transcript in state with the database ID
+                setTranscripts(prev => 
+                  prev.map(t => 
+                    t.temp_id === tempId || (t.speaker_id === speakerId && t.content === transcript && !t.id)
+                      ? { ...t, id: persistedTranscript.id, temp_id: undefined }
+                      : t
+                  )
+                );
+                
+                console.log('✅ ENHANCED LOGGING: Transcript persisted with ID:', persistedTranscript.id);
+                
+                // Process for AI insights
+                await processTranscript(persistedTranscript);
+              }
+            } catch (error) {
+              console.error('❌ ENHANCED LOGGING: Error persisting transcript:', error);
             }
           }
         }
@@ -806,7 +865,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
     setDeepgramErrors([]);
   };
   
-  // FIXED: Group transcripts by speaker for chat bubble display
+  // FIXED: Group transcripts by speaker for chat bubble display with robust speaker separation
   const groupedTranscripts = transcripts.reduce((groups: TranscriptGroup[], transcript, index) => {
     // If this is the first transcript or the speaker changed from the previous one
     if (index === 0 || transcript.speaker_id !== transcripts[index - 1].speaker_id) {
@@ -906,7 +965,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
               </div>
             ) : (
               <div className="space-y-6">
-                {/* Render grouped transcripts as chat bubbles (latest at top) */}
+                {/* FIXED: Render grouped transcripts as chat bubbles with proper speaker separation */}
                 {reversedGroups.map((group, groupIndex) => {
                   const isSalesperson = group.speaker_id === 0;
                   
@@ -915,7 +974,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
                   
                   return (
                     <div 
-                      key={`group-${groupIndex}`} 
+                      key={`group-${groupIndex}-${group.speaker_id}-${group.timestamp_offset}`} 
                       className={cn(
                         "flex w-full",
                         isSalesperson ? "justify-end" : "justify-start"
