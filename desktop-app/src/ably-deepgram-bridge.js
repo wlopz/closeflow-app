@@ -484,57 +484,21 @@ class AblyDeepgramBridge {
     console.log('🎤 ENHANCED LOGGING: Using sample rate:', sampleRate || this.audioCharacteristics.sampleRate);
     console.log('🎤 ENHANCED LOGGING: Using channel count:', channelCount || this.audioCharacteristics.channelCount);
 
+    // MODIFIED: Simplified URL with only essential parameters
     const dgUrl = new URL('wss://api.deepgram.com/v1/listen');
+    
+    // Add only the essential parameters
     dgUrl.searchParams.set('model', 'nova-2');
     dgUrl.searchParams.set('language', 'en-US');
     dgUrl.searchParams.set('interim_results', 'true');
     dgUrl.searchParams.set('punctuate', 'true');
     dgUrl.searchParams.set('smart_format', 'true');
     
-    // Use provided values or defaults from audioCharacteristics
-    const actualSampleRate = sampleRate || this.audioCharacteristics.sampleRate;
-    const actualChannelCount = channelCount || this.audioCharacteristics.channelCount;
-    
-    dgUrl.searchParams.set('sample_rate', actualSampleRate.toString());
-    dgUrl.searchParams.set('channels', actualChannelCount.toString());
-    
-    // Parse MIME type to determine encoding and container
-    let encoding = this.audioCharacteristics.encoding;
-    let container = this.audioCharacteristics.container;
-    
-    if (mimeType) {
-      console.log('🎤 ENHANCED LOGGING: Parsing MIME type:', mimeType);
-      
-      // Parse MIME type like "audio/webm;codecs=opus"
-      const [mediaType, codecsParam] = mimeType.split(';');
-      
-      if (mediaType) {
-        const [, containerType] = mediaType.split('/');
-        if (containerType) {
-          container = containerType;
-          console.log('🎤 ENHANCED LOGGING: Extracted container:', container);
-        }
-      }
-      
-      if (codecsParam) {
-        const codecsMatch = codecsParam.match(/codecs=([^,\s]+)/);
-        if (codecsMatch && codecsMatch[1]) {
-          encoding = codecsMatch[1];
-          console.log('🎤 ENHANCED LOGGING: Extracted encoding:', encoding);
-        }
-      }
-      
-      // Update audio characteristics
-      this.audioCharacteristics.encoding = encoding;
-      this.audioCharacteristics.container = container;
-    }
-    
-    dgUrl.searchParams.set('encoding', encoding);
-    dgUrl.searchParams.set('container', container);
+    // REMOVED: No longer setting sample_rate, channels, encoding, or container
+    // Let Deepgram detect these from the WebM container
     
     console.log('🔗 ENHANCED LOGGING: Deepgram connection URL:', dgUrl.toString());
-    console.log('🎤 ENHANCED LOGGING: Final audio format - encoding:', encoding, 'container:', container);
-
+    
     const ws = new WebSocket(dgUrl.toString(), ['token', this.deepgramApiKey]);
     
     // Add detailed logging around WebSocket creation and state

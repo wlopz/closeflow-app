@@ -64,8 +64,6 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
   const [isPollingMessages, setIsPollingMessages] = useState(false);
   const [deepgramApiKey, setDeepgramApiKey] = useState<string | null>(null);
   const [mimeType, setMimeType] = useState<string | null>(null);
-  const [sampleRate, setSampleRate] = useState<number | null>(null);
-  const [channelCount, setChannelCount] = useState<number | null>(null);
   const [desktopCallStarted, setDesktopCallStarted] = useState(false);
   const [deepgramErrors, setDeepgramErrors] = useState<string[]>([]);
   
@@ -101,8 +99,6 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         console.log('🚀 ENHANCED LOGGING: Desktop call is active, starting live analysis automatically');
         console.log('🚀 ENHANCED LOGGING: Using Deepgram API key:', deepgramApiKey ? `${deepgramApiKey.substring(0, 8)}...` : 'none');
         console.log('🚀 ENHANCED LOGGING: Using MIME type:', mimeType);
-        console.log('🚀 ENHANCED LOGGING: Using sample rate:', sampleRate);
-        console.log('🚀 ENHANCED LOGGING: Using channel count:', channelCount);
         
         try {
           await startLive();
@@ -119,7 +115,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
     };
 
     handleDesktopCallActivation();
-  }, [desktopCallActive, isLive, user, desktopCallStarted, deepgramApiKey, mimeType, sampleRate, channelCount]);
+  }, [desktopCallActive, isLive, user, desktopCallStarted, deepgramApiKey, mimeType]);
   
   // Timer for elapsed time
   useEffect(() => {
@@ -289,14 +285,6 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
           setMimeType(content.deviceSettings.mimeType);
           console.log('🎤 ENHANCED LOGGING: Stored MIME type:', content.deviceSettings.mimeType);
         }
-        if (content.deviceSettings?.sampleRate) {
-          setSampleRate(content.deviceSettings.sampleRate);
-          console.log('🎤 ENHANCED LOGGING: Stored sample rate:', content.deviceSettings.sampleRate);
-        }
-        if (content.deviceSettings?.channelCount) {
-          setChannelCount(content.deviceSettings.channelCount);
-          console.log('🎤 ENHANCED LOGGING: Stored channel count:', content.deviceSettings.channelCount);
-        }
         
         // Mark that we've received the desktop call started message
         setDesktopCallStarted(true);
@@ -328,8 +316,6 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       console.log('🚀 ENHANCED LOGGING: Starting live call analysis');
       console.log('🚀 ENHANCED LOGGING: Deepgram API key available:', !!deepgramApiKey);
       console.log('🚀 ENHANCED LOGGING: MIME type available:', !!mimeType);
-      console.log('🚀 ENHANCED LOGGING: Sample rate available:', !!sampleRate);
-      console.log('🚀 ENHANCED LOGGING: Channel count available:', !!channelCount);
       
       if (!user) {
         toast({
@@ -365,8 +351,6 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
           await channels.controlChannel.publish('start-transcription', {
             deepgramApiKey: deepgramApiKey,
             mimeType: mimeType,
-            sampleRate: sampleRate,
-            channelCount: channelCount,
             callId: newCall.id,
             timestamp: Date.now()
           });
@@ -777,8 +761,6 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
     setInsights([]);
     setDeepgramApiKey(null);
     setMimeType(null);
-    setSampleRate(null);
-    setChannelCount(null);
     setDeepgramErrors([]);
   };
   
@@ -913,8 +895,6 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
                     </h4>
                     <div className="mt-2 text-xs text-blue-600 dark:text-blue-400">
                       <p className="mb-1">• MIME Type: {mimeType || 'Not detected'}</p>
-                      <p className="mb-1">• Sample Rate: {sampleRate || '48000'} Hz</p>
-                      <p className="mb-1">• Channels: {channelCount || '1'}</p>
                       <p className="mb-1">• Deepgram Connected: {deepgramErrors.length === 0 ? 'Yes' : 'No'}</p>
                     </div>
                     <p className="mt-2 text-xs text-blue-600 dark:text-blue-400">

@@ -264,29 +264,19 @@ class CloseFlowDesktop {
       }
     });
 
-    // Update the IPC handler to accept and pass the mimeType, sampleRate, and channelCount
+    // Update the IPC handler to accept and pass the mimeType
     ipcMain.handle('start-call-analysis', async (event, options = {}) => {
       try {
-        const { 
-          inputDeviceId, 
-          outputDeviceId, 
-          systemAudioSourceId, 
-          mimeType,
-          sampleRate,
-          channelCount
-        } = options;
+        const { inputDeviceId, outputDeviceId, systemAudioSourceId, mimeType } = options;
         
         // Update selected devices if provided
         if (inputDeviceId) this.selectedDevices.input = inputDeviceId;
         if (outputDeviceId) this.selectedDevices.output = outputDeviceId;
         if (systemAudioSourceId) this.selectedSystemAudioSource = systemAudioSourceId;
         
-        console.log('🎤 ENHANCED LOGGING: Starting call analysis with audio parameters:');
-        console.log('🎤 ENHANCED LOGGING: MIME type:', mimeType);
-        console.log('🎤 ENHANCED LOGGING: Sample rate:', sampleRate);
-        console.log('🎤 ENHANCED LOGGING: Channel count:', channelCount);
+        console.log('🎤 ENHANCED LOGGING: Starting call analysis with MIME type:', mimeType);
         
-        return await this.startCallAnalysis(mimeType, sampleRate, channelCount);
+        return await this.startCallAnalysis(mimeType);
       } catch (error) {
         console.error('Error in start-call-analysis handler:', error);
         throw error;
@@ -935,8 +925,8 @@ class CloseFlowDesktop {
     this.sendToRenderer('connection-status-changed', status);
   }
 
-  // MODIFIED: Improved to handle call state properly and pass audio parameters
-  async startCallAnalysis(mimeType = null, sampleRate = null, channelCount = null) {
+  // MODIFIED: Improved to handle call state properly
+  async startCallAnalysis(mimeType = null) {
     if (!this.isZoomDetected) {
       throw new Error('No Zoom meeting detected');
     }
@@ -964,11 +954,9 @@ class CloseFlowDesktop {
         isStoppingCall: this.isStoppingCall
       });
       
-      // Send start command to web app via HTTP POST with audio parameters
+      // Send start command to web app via HTTP POST with mimeType
       console.log('🚀 ENHANCED LOGGING: Sending desktop-request-start-call to web app');
       console.log('🎤 ENHANCED LOGGING: Including MIME type:', mimeType);
-      console.log('🎤 ENHANCED LOGGING: Including sample rate:', sampleRate);
-      console.log('🎤 ENHANCED LOGGING: Including channel count:', channelCount);
       
       const response = await fetch(`${this.webAppUrl}/api/desktop-sync`, {
         method: 'POST',
@@ -981,9 +969,7 @@ class CloseFlowDesktop {
             input: this.selectedDevices.input,
             output: this.selectedDevices.output,
             systemAudioSource: this.selectedSystemAudioSource,
-            mimeType: mimeType,
-            sampleRate: sampleRate,
-            channelCount: channelCount
+            mimeType: mimeType // Include the MIME type
           },
           timestamp: Date.now()
         })

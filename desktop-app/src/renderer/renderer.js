@@ -729,13 +729,9 @@ class DesktopRenderer {
 
             // ENHANCED: Get the actual audio settings from the MediaRecorder
             const actualMimeType = audioSettings.mimeType;
-            const actualSampleRate = audioSettings.sampleRate;
-            const actualChannelCount = audioSettings.channelCount;
             
             console.log('🎤 ENHANCED LOGGING: Using audio settings for call analysis:');
             console.log('🎤 ENHANCED LOGGING: MIME type:', actualMimeType);
-            console.log('🎤 ENHANCED LOGGING: Sample rate:', actualSampleRate);
-            console.log('🎤 ENHANCED LOGGING: Channel count:', actualChannelCount);
             
             // NOTE: We don't start the MediaRecorder here anymore
             // It will be started when we receive the start-audio-transmission message
@@ -744,9 +740,7 @@ class DesktopRenderer {
                 inputDeviceId: this.selectedDevices.input,
                 outputDeviceId: this.selectedDevices.output,
                 systemAudioSourceId: this.selectedSystemAudioSource,
-                mimeType: actualMimeType,
-                sampleRate: actualSampleRate,
-                channelCount: actualChannelCount
+                mimeType: actualMimeType
             });
             
             if (!result.success) {
