@@ -609,11 +609,45 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
           console.log('📝 ENHANCED LOGGING: Processing transcript from Deepgram:', transcript);
           console.log('📝 ENHANCED LOGGING: Is final:', message.data.data.is_final);
           
-          // Determine speaker (simplified logic)
-          const speakerId = 0; // Default to salesperson for now
-          const speakerName = speakerId === 0 ? 'You' : 'Customer';
+          // FIXED: Extract speaker ID from Deepgram's speaker diarization
+          let speakerId = 0; // Default to salesperson
+          let speakerName = 'You'; // Default speaker name
           
-          // Create transcript record
+          // Check if we have word-level speaker information
+          if (alternative.words && alternative.words.length > 0) {
+            // Count speaker occurrences to determine dominant speaker
+            const speakerCounts = new Map<number, number>();
+            
+            alternative.words.forEach((word: any) => {
+              if (word.speaker !== undefined) {
+                const currentCount = speakerCounts.get(word.speaker) || 0;
+                speakerCounts.set(word.speaker, currentCount + 1);
+              }
+            });
+            
+            if (speakerCounts.size > 0) {
+              // Find the speaker with the most words in this segment
+              let maxCount = 0;
+              let dominantSpeaker = 0;
+              
+              for (const [speaker, count] of speakerCounts.entries()) {
+                if (count > maxCount) {
+                  maxCount = count;
+                  dominantSpeaker = speaker;
+                }
+              }
+              
+              speakerId = dominantSpeaker;
+              speakerName = dominantSpeaker === 0 ? 'You' : 'Customer';
+              
+              console.log('🎯 ENHANCED LOGGING: Speaker diarization results:');
+              console.log('🎯 ENHANCED LOGGING: Speaker counts:', Object.fromEntries(speakerCounts));
+              console.log('🎯 ENHANCED LOGGING: Dominant speaker:', dominantSpeaker);
+              console.log('🎯 ENHANCED LOGGING: Assigned speaker name:', speakerName);
+            }
+          }
+          
+          // Create transcript record with proper speaker information
           const newTranscript = await CallsService.addTranscript({
             call_id: callId,
             speaker_id: speakerId,
@@ -772,7 +806,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
     setDeepgramErrors([]);
   };
   
-  // Group transcripts by speaker for chat bubble display
+  // FIXED: Group transcripts by speaker for chat bubble display
   const groupedTranscripts = transcripts.reduce((groups: TranscriptGroup[], transcript, index) => {
     // If this is the first transcript or the speaker changed from the previous one
     if (index === 0 || transcript.speaker_id !== transcripts[index - 1].speaker_id) {
