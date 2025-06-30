@@ -433,9 +433,9 @@ export async function POST(request: NextRequest) {
           return Response.json({ error: 'Deepgram API key not configured' }, { status: 500 });
         }
 
-        // Validate Deepgram API key format
-        if (deepgramApiKey.length < 32 || deepgramApiKey === 'd2763bda26344d49f04f25b1deeb6f054653f94f') {
-          console.error('❌ ENHANCED LOGGING: Invalid Deepgram API key detected (placeholder or too short)');
+        // Validate Deepgram API key format - MODIFIED: Removed hardcoded key check
+        if (deepgramApiKey.length < 32) {
+          console.error('❌ ENHANCED LOGGING: Invalid Deepgram API key detected (too short)');
           return Response.json({ 
             error: 'Invalid Deepgram API key. Please set a valid API key from your Deepgram console.',
             hint: 'Visit https://console.deepgram.com/ to get your API key'
