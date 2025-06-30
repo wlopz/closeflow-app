@@ -62,6 +62,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
   const [isPollingMessages, setIsPollingMessages] = useState(false);
   const [deepgramApiKey, setDeepgramApiKey] = useState<string | null>(null);
   const [mimeType, setMimeType] = useState<string | null>(null);
+  const [desktopCallStarted, setDesktopCallStarted] = useState(false);
   
   // Refs
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -86,6 +87,32 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       stopLive();
     }
   }, [desktopCallActive, isLive]);
+
+  // CRITICAL FIX: Add effect to start call when desktop call becomes active
+  useEffect(() => {
+    const handleDesktopCallActivation = async () => {
+      // Only start if desktop call is active, we're not already live, and we have a user
+      if (desktopCallActive && !isLive && user && desktopCallStarted && deepgramApiKey && mimeType) {
+        console.log('🚀 ENHANCED LOGGING: Desktop call is active, starting live analysis automatically');
+        console.log('🚀 ENHANCED LOGGING: Using Deepgram API key:', deepgramApiKey ? `${deepgramApiKey.substring(0, 8)}...` : 'none');
+        console.log('🚀 ENHANCED LOGGING: Using MIME type:', mimeType);
+        
+        try {
+          await startLive();
+          console.log('✅ ENHANCED LOGGING: Successfully started live analysis in response to desktop call');
+        } catch (error) {
+          console.error('❌ ENHANCED LOGGING: Failed to auto-start live analysis:', error);
+          toast({
+            title: "Failed to start call analysis",
+            description: "Could not automatically start call analysis. Please try manually.",
+            variant: "destructive"
+          });
+        }
+      }
+    };
+
+    handleDesktopCallActivation();
+  }, [desktopCallActive, isLive, user, desktopCallStarted, deepgramApiKey, mimeType]);
   
   // Timer for elapsed time
   useEffect(() => {
@@ -247,15 +274,16 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         // Store the API key and MIME type for later use
         if (content.deepgramApiKey) {
           setDeepgramApiKey(content.deepgramApiKey);
+          console.log('🔑 ENHANCED LOGGING: Stored Deepgram API key:', content.deepgramApiKey ? `${content.deepgramApiKey.substring(0, 8)}...` : 'none');
         }
         if (content.deviceSettings?.mimeType) {
           setMimeType(content.deviceSettings.mimeType);
+          console.log('🎤 ENHANCED LOGGING: Stored MIME type:', content.deviceSettings.mimeType);
         }
         
-        // If we're not already live, start the call
-        if (!isLive && user) {
-          await startLive();
-        }
+        // Mark that we've received the desktop call started message
+        setDesktopCallStarted(true);
+        
         break;
         
       case 'desktop-call-stopped':
@@ -265,6 +293,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         if (isLive) {
           await stopLive();
         }
+        
         break;
         
       default:
@@ -281,6 +310,8 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       setIsLoading(true);
       
       console.log('🚀 ENHANCED LOGGING: Starting live call analysis');
+      console.log('🚀 ENHANCED LOGGING: Deepgram API key available:', !!deepgramApiKey);
+      console.log('🚀 ENHANCED LOGGING: MIME type available:', !!mimeType);
       
       if (!user) {
         toast({
@@ -330,6 +361,17 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
           
           ablySubscriptionsRef.current.push(resultsSubscription);
           console.log('✅ ENHANCED LOGGING: Subscribed to Deepgram results channel');
+        } else {
+          console.error('❌ ENHANCED LOGGING: Missing required data for Ably communication');
+          console.log('Channels available:', !!channels);
+          console.log('Deepgram API key available:', !!deepgramApiKey);
+          console.log('MIME type available:', !!mimeType);
+          
+          toast({
+            title: "Configuration Error",
+            description: "Missing required configuration for call analysis. Check console for details.",
+            variant: "destructive"
+          });
         }
       } else {
         // Set up regular Supabase real-time subscriptions for manual calls
@@ -388,6 +430,23 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       
       console.log('✅ ENHANCED LOGGING: Live call analysis started successfully');
       
+      // Notify web app that call has started
+      try {
+        await fetch('/api/desktop-sync', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            type: 'web-app-call-started-confirmation',
+            timestamp: Date.now()
+          })
+        });
+        console.log('✅ ENHANCED LOGGING: Sent web-app-call-started-confirmation to API');
+      } catch (error) {
+        console.error('❌ ENHANCED LOGGING: Error sending call started confirmation:', error);
+      }
+      
     } catch (error) {
       console.error('❌ ENHANCED LOGGING: Error starting live call analysis:', error);
       
@@ -444,6 +503,23 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       setIsLive(false);
       setShowFeedback(true);
       
+      // Notify web app that call has stopped
+      try {
+        await fetch('/api/desktop-sync', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            type: 'web-app-call-stopped-confirmation',
+            timestamp: Date.now()
+          })
+        });
+        console.log('✅ ENHANCED LOGGING: Sent web-app-call-stopped-confirmation to API');
+      } catch (error) {
+        console.error('❌ ENHANCED LOGGING: Error sending call stopped confirmation:', error);
+      }
+      
     } catch (error) {
       console.error('❌ ENHANCED LOGGING: Error stopping live call analysis:', error);
       
@@ -455,6 +531,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       
     } finally {
       setIsEndingCall(false);
+      setDesktopCallStarted(false);
       
       // Notify parent component
       onCallEnd();
@@ -761,4 +838,9 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       )}
     </>
   );
+}
+
+// Utility function for class names
+function cn(...classes: (string | boolean | undefined)[]) {
+  return classes.filter(Boolean).join(' ');
 }
