@@ -484,19 +484,18 @@ class AblyDeepgramBridge {
     console.log('🎤 ENHANCED LOGGING: Using sample rate:', sampleRate || this.audioCharacteristics.sampleRate);
     console.log('🎤 ENHANCED LOGGING: Using channel count:', channelCount || this.audioCharacteristics.channelCount);
 
-    // MODIFIED: Simplified URL with only essential parameters
+    // CRITICAL FIX: Add diarize=true parameter for speaker separation
     const dgUrl = new URL('wss://api.deepgram.com/v1/listen');
     
-    // Add only the essential parameters
+    // Add essential parameters including speaker diarization
     dgUrl.searchParams.set('model', 'nova-2');
     dgUrl.searchParams.set('language', 'en-US');
     dgUrl.searchParams.set('interim_results', 'true');
     dgUrl.searchParams.set('punctuate', 'true');
     dgUrl.searchParams.set('smart_format', 'true');
+    dgUrl.searchParams.set('diarize', 'true'); // CRITICAL: Enable speaker diarization
     
-    // REMOVED: No longer setting sample_rate, channels, encoding, or container
-    // Let Deepgram detect these from the WebM container
-    
+    console.log('🎯 ENHANCED LOGGING: CRITICAL FIX - Speaker diarization enabled with diarize=true');
     console.log('🔗 ENHANCED LOGGING: Deepgram connection URL:', dgUrl.toString());
     
     const ws = new WebSocket(dgUrl.toString(), ['token', this.deepgramApiKey]);
@@ -517,7 +516,7 @@ class AblyDeepgramBridge {
         return;
       }
 
-      console.log('✅ ENHANCED LOGGING: Connected to Deepgram successfully');
+      console.log('✅ ENHANCED LOGGING: Connected to Deepgram successfully with speaker diarization enabled');
       
       this.deepgramConnection = ws;
       this.deepgramReady = true;
@@ -537,9 +536,10 @@ class AblyDeepgramBridge {
       // Notify web app via Ably that Deepgram is ready
       if (this.resultsChannel) {
         this.resultsChannel.publish('deepgram-connected', {
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          diarizationEnabled: true // Indicate that speaker diarization is active
         });
-        console.log('✅ ENHANCED LOGGING: Notified web app via Ably that Deepgram is connected');
+        console.log('✅ ENHANCED LOGGING: Notified web app via Ably that Deepgram is connected with diarization');
       }
       
       // Call the callback if provided
@@ -585,7 +585,7 @@ class AblyDeepgramBridge {
             console.log('📝 ENHANCED LOGGING: Transcript:', alternative.transcript);
             console.log('📝 ENHANCED LOGGING: Is final:', message.is_final);
             
-            // Try to get speaker from words array
+            // CRITICAL: Log speaker diarization information
             const words = alternative.words;
             if (words && words.length > 0) {
               const speakerCounts = new Map();
@@ -604,9 +604,15 @@ class AblyDeepgramBridge {
                     dominantSpeaker = speaker;
                   }
                 }
-                console.log('📝 ENHANCED LOGGING: Detected speakers:', Array.from(speakerCounts.keys()));
-                console.log('📝 ENHANCED LOGGING: Dominant speaker:', dominantSpeaker);
+                console.log('🎯 ENHANCED LOGGING: SPEAKER DIARIZATION RESULTS:');
+                console.log('🎯 ENHANCED LOGGING: Detected speakers:', Array.from(speakerCounts.keys()));
+                console.log('🎯 ENHANCED LOGGING: Speaker word counts:', Object.fromEntries(speakerCounts));
+                console.log('🎯 ENHANCED LOGGING: Dominant speaker for this segment:', dominantSpeaker);
+              } else {
+                console.log('⚠️ ENHANCED LOGGING: No speaker information found in words array');
               }
+            } else {
+              console.log('⚠️ ENHANCED LOGGING: No words array found in Deepgram response');
             }
           }
         } else if (message.type === 'Metadata') {
