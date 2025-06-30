@@ -9,11 +9,13 @@ import {
   MicOff, 
   Phone,
   Volume2,
+  RefreshCw,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { CallAnalyzer } from './components/call-analyzer';
 import { CallHistoryDetailed } from '@/components/dashboard/call-history-detailed';
+import { useToast } from '@/hooks/use-toast';
 
 export default function CallsPage() {
   const [isCallActive, setIsCallActive] = useState(false);
@@ -22,9 +24,17 @@ export default function CallsPage() {
   const [isMuted, setIsMuted] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [desktopConnected, setDesktopConnected] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const { toast } = useToast();
   
-  // Add this line to check the environment variable
-  console.log('🔑 Deepgram API Key from CallsPage:', process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY);
+  // Check Deepgram API key and show warning if invalid
+  const deepgramApiKey = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
+  const isValidDeepgramKey = deepgramApiKey && 
+    deepgramApiKey.length >= 32 && 
+    deepgramApiKey !== 'd2763bda26344d49f04f25b1deeb6f054653f94f';
+
+  console.log('🔑 Deepgram API Key from CallsPage:', deepgramApiKey);
+  console.log('🔑 Deepgram API Key Valid:', isValidDeepgramKey);
 
   // SIMPLIFIED: Derived state for actual call activity
   const actualCallActive = isCallActive || desktopCallActive;
@@ -55,6 +65,7 @@ export default function CallsPage() {
         
         console.log('📊 ENHANCED LOGGING: Desktop status response:', data);
         console.log('📊 ENHANCED LOGGING: Connected:', data.connected);
+        console.log('📊 ENHANCED LOGGING: Call Active:', data.callActive);
         
         setDesktopConnected(data.connected);
         
@@ -64,6 +75,7 @@ export default function CallsPage() {
       } catch (error) {
         console.error('❌ ENHANCED LOGGING: Error checking desktop status from CallsPage:', error);
         setDesktopConnected(false);
+        setDesktopCallActive(false);
       }
     };
 
@@ -71,6 +83,43 @@ export default function CallsPage() {
     const interval = setInterval(checkDesktopStatus, 3000); // Check every 3 seconds
     return () => clearInterval(interval);
   }, []);
+
+  // Manual reset function for stuck call states
+  const handleResetCallState = async () => {
+    setIsResetting(true);
+    try {
+      console.log('🔧 ENHANCED LOGGING: Manual reset call state requested');
+      
+      const response = await fetch('/api/desktop-sync?action=reset-call-state');
+      const data = await response.json();
+      
+      if (data.success) {
+        toast({
+          title: 'Call State Reset',
+          description: 'Successfully reset call state and cleared message queue.',
+        });
+        
+        // Reset local state
+        setIsCallActive(false);
+        setDesktopCallActive(false);
+        setElapsedTime(0);
+        
+        // Trigger refresh
+        setRefreshTrigger(prev => prev + 1);
+      } else {
+        throw new Error(data.message || 'Failed to reset call state');
+      }
+    } catch (error) {
+      console.error('❌ ENHANCED LOGGING: Error resetting call state:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Reset Failed',
+        description: 'Failed to reset call state. Please try again.',
+      });
+    } finally {
+      setIsResetting(false);
+    }
+  };
   
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -106,6 +155,14 @@ export default function CallsPage() {
           </p>
         </div>
         <div className="flex items-center gap-4">
+          {/* Deepgram API Key Warning */}
+          {!isValidDeepgramKey && (
+            <div className="flex items-center gap-2 text-sm px-3 py-1 rounded-full border border-orange-200 bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:border-orange-800 dark:text-orange-400">
+              <div className="w-2 h-2 rounded-full bg-orange-500"></div>
+              Invalid Deepgram API Key
+            </div>
+          )}
+          
           {/* Desktop Connection Status */}
           <div className={cn(
             "flex items-center gap-2 text-sm px-3 py-1 rounded-full border",
@@ -119,6 +176,20 @@ export default function CallsPage() {
             )}></div>
             Desktop {desktopConnected ? 'Connected' : 'Disconnected'}
           </div>
+          
+          {/* Reset Button for stuck states */}
+          {(actualCallActive && !desktopConnected) && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleResetCallState}
+              disabled={isResetting}
+              className="gap-2"
+            >
+              <RefreshCw className={cn("h-4 w-4", isResetting && "animate-spin")} />
+              {isResetting ? 'Resetting...' : 'Reset State'}
+            </Button>
+          )}
           
           {/* Call Status Badge */}
           {actualCallActive && (
@@ -134,6 +205,37 @@ export default function CallsPage() {
           )}
         </div>
       </div>
+      
+      {/* Deepgram API Key Warning Card */}
+      {!isValidDeepgramKey && (
+        <Card className="border-orange-200 bg-orange-50 dark:bg-orange-900/20 dark:border-orange-800">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <div className="w-5 h-5 rounded-full bg-orange-500 flex items-center justify-center mt-0.5">
+                <span className="text-white text-xs font-bold">!</span>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-orange-800 dark:text-orange-200 mb-1">
+                  Deepgram API Key Required
+                </h3>
+                <p className="text-sm text-orange-700 dark:text-orange-300 mb-3">
+                  Speech-to-text functionality requires a valid Deepgram API key. The current key appears to be a placeholder or invalid.
+                </p>
+                <div className="text-xs text-orange-600 dark:text-orange-400">
+                  <p className="mb-1"><strong>To fix this:</strong></p>
+                  <ol className="list-decimal list-inside space-y-1 ml-2">
+                    <li>Visit <a href="https://console.deepgram.com/" target="_blank" rel="noopener noreferrer" className="underline">https://console.deepgram.com/</a></li>
+                    <li>Create an account or sign in</li>
+                    <li>Generate a new API key</li>
+                    <li>Update your <code className="bg-orange-100 dark:bg-orange-800 px-1 rounded">NEXT_PUBLIC_DEEPGRAM_API_KEY</code> environment variable</li>
+                    <li>Restart the development server</li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
       
       <div className="grid grid-cols-1 gap-6">
         <Card className="flex flex-col">
@@ -182,6 +284,11 @@ export default function CallsPage() {
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                       Desktop call is active - CallAnalyzer is processing audio
+                      {!isValidDeepgramKey && (
+                        <span className="text-orange-600 dark:text-orange-400 ml-2">
+                          (⚠️ Deepgram API key required for transcription)
+                        </span>
+                      )}
                     </div>
                   ) : (
                     'CallAnalyzer is active for manual call'
@@ -215,6 +322,11 @@ export default function CallsPage() {
                   {!desktopConnected && (
                     <p className="text-xs text-muted-foreground">
                       For Zoom integration, ensure the desktop app is running and connected
+                    </p>
+                  )}
+                  {!isValidDeepgramKey && (
+                    <p className="text-xs text-orange-600 dark:text-orange-400">
+                      Configure Deepgram API key for speech-to-text functionality
                     </p>
                   )}
                 </div>

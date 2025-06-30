@@ -174,11 +174,23 @@ export async function GET(request: NextRequest) {
           .eq('sender', 'desktop')
           .eq('recipient', 'webapp');
 
+        // CRITICAL FIX: Only consider call active if desktop is connected AND web_app_call_active is true
+        const effectiveCallActive = isDesktopConnected && syncState.web_app_call_active;
+
+        // ADDITIONAL FIX: If desktop is not connected but web_app_call_active is true, reset it
+        if (!isDesktopConnected && syncState.web_app_call_active) {
+          console.log('🔧 ENHANCED LOGGING: Desktop disconnected but call marked active - resetting state');
+          await supabase
+            .from('desktop_sync_state')
+            .update({ web_app_call_active: false })
+            .eq('id', DESKTOP_SYNC_STATE_ID);
+        }
+
         const statusResponse = {
           connected: isDesktopConnected,
           activeConnections: isDesktopConnected ? 1 : 0,
           serverRunning: true,
-          callActive: syncState.web_app_call_active,
+          callActive: effectiveCallActive, // This is the key fix
           pendingMessages: webAppToDesktopCount || 0, // Desktop checks this queue
           pendingWebAppMessages: desktopToWebAppCount || 0, // Web app checks this queue
           lastPing: lastPingTimestamp
@@ -190,7 +202,9 @@ export async function GET(request: NextRequest) {
           lastPing: lastPingTimestamp,
           timeDiff: Date.now() - lastPingTimestamp,
           threshold: 10000,
-          isConnected: isDesktopConnected
+          isConnected: isDesktopConnected,
+          dbCallActive: syncState.web_app_call_active,
+          effectiveCallActive: effectiveCallActive
         });
         
         return Response.json(statusResponse);
@@ -329,11 +343,38 @@ export async function GET(request: NextRequest) {
         console.log('🛑 ENHANCED LOGGING: Added web-call-stopped message to DB');
         return Response.json({ success: true, message: 'Stop signal sent to desktop' });
 
+      case 'reset-call-state':
+        console.log('🔧 ENHANCED LOGGING: Manual reset call state request');
+        
+        // Force reset the call state
+        const { error: resetError } = await supabase
+          .from('desktop_sync_state')
+          .update({ web_app_call_active: false })
+          .eq('id', DESKTOP_SYNC_STATE_ID);
+          
+        if (resetError) {
+          console.error('❌ ENHANCED LOGGING: Error resetting call state:', resetError);
+          return Response.json({ error: 'Failed to reset call state' }, { status: 500 });
+        }
+        
+        // Clear any pending messages
+        const { error: clearError } = await supabase
+          .from('desktop_messages_queue')
+          .delete()
+          .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all messages
+          
+        if (clearError) {
+          console.error('❌ ENHANCED LOGGING: Error clearing message queue:', clearError);
+        }
+        
+        console.log('🔧 ENHANCED LOGGING: Call state reset and message queue cleared');
+        return Response.json({ success: true, message: 'Call state reset successfully' });
+
       default:
         console.log('❓ ENHANCED LOGGING: Invalid GET action:', action);
         return Response.json({ 
           error: 'Invalid action',
-          availableActions: ['status', 'get-messages-for-webapp', 'get-messages-for-desktop', 'trigger-start', 'trigger-stop']
+          availableActions: ['status', 'get-messages-for-webapp', 'get-messages-for-desktop', 'trigger-start', 'trigger-stop', 'reset-call-state']
         });
     }
   } catch (error) {
@@ -385,10 +426,20 @@ export async function POST(request: NextRequest) {
         // Get the Deepgram API key from environment
         const deepgramApiKey = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
         console.log('🔑 ENHANCED LOGGING: Deepgram API key available:', !!deepgramApiKey);
+        console.log('🔑 ENHANCED LOGGING: Deepgram API key value:', deepgramApiKey ? `${deepgramApiKey.substring(0, 8)}...` : 'NOT SET');
         
         if (!deepgramApiKey) {
           console.error('❌ ENHANCED LOGGING: No Deepgram API key found in web app environment');
           return Response.json({ error: 'Deepgram API key not configured' }, { status: 500 });
+        }
+
+        // Validate Deepgram API key format
+        if (deepgramApiKey.length < 32 || deepgramApiKey === 'd2763bda26344d49f04f25b1deeb6f054653f94f') {
+          console.error('❌ ENHANCED LOGGING: Invalid Deepgram API key detected (placeholder or too short)');
+          return Response.json({ 
+            error: 'Invalid Deepgram API key. Please set a valid API key from your Deepgram console.',
+            hint: 'Visit https://console.deepgram.com/ to get your API key'
+          }, { status: 500 });
         }
 
         // Store the start request message for web app to pick up
