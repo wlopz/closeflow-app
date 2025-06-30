@@ -84,6 +84,12 @@ class AblyDeepgramBridge {
     }
   }
 
+  // Set callback for Deepgram connection status
+  setDeepgramConnectedCallback(callback) {
+    this.onDeepgramConnected = callback;
+    console.log('✅ ENHANCED LOGGING: Set Deepgram connection callback');
+  }
+
   setupChannels() {
     console.log('📡 ENHANCED LOGGING: Setting up Ably channels');
 
@@ -100,12 +106,6 @@ class AblyDeepgramBridge {
     this.resultsChannel = this.ablyClient.channels.get('closeflow:deepgram-results');
 
     console.log('✅ ENHANCED LOGGING: Ably channels set up successfully');
-  }
-
-  // Set callback for Deepgram connection status
-  setDeepgramConnectedCallback(callback) {
-    this.onDeepgramConnected = callback;
-    console.log('✅ ENHANCED LOGGING: Set Deepgram connection callback');
   }
 
   // Updated handleControlMessage to extract and use mimeType
@@ -147,24 +147,42 @@ class AblyDeepgramBridge {
 
   // Handle audio data from desktop app
   handleAudioData(audioData) {
-    console.log('🎤 ENHANCED LOGGING: Received audio data from desktop');
-    console.log('🎤 ENHANCED LOGGING: Audio data size:', audioData.length);
-    console.log('🎤 ENHANCED LOGGING: Audio data type:', typeof audioData);
-    console.log('🎤 ENHANCED LOGGING: Is Buffer:', Buffer.isBuffer(audioData));
-    console.log('🎤 ENHANCED LOGGING: Deepgram connection exists:', !!this.deepgramConnection);
-    console.log('🎤 ENHANCED LOGGING: Deepgram ready flag:', this.deepgramReady);
-    console.log('🎤 ENHANCED LOGGING: Transcription active flag:', this.transcriptionActive);
-
     // Track received chunks
     this.receivedChunkCount++;
+    
+    // Skip logging for every chunk to reduce noise
+    if (this.receivedChunkCount % 20 === 0) {
+      console.log('🎤 ENHANCED LOGGING: Received audio data from desktop');
+      console.log('🎤 ENHANCED LOGGING: Audio data size:', audioData.length);
+      console.log('🎤 ENHANCED LOGGING: Audio data type:', typeof audioData);
+      console.log('🎤 ENHANCED LOGGING: Is Buffer:', Buffer.isBuffer(audioData));
+      console.log('🎤 ENHANCED LOGGING: Deepgram connection exists:', !!this.deepgramConnection);
+      console.log('🎤 ENHANCED LOGGING: Deepgram ready flag:', this.deepgramReady);
+      console.log('🎤 ENHANCED LOGGING: Transcription active flag:', this.transcriptionActive);
+      console.log('🎤 ENHANCED LOGGING: Total chunks received:', this.receivedChunkCount);
+    }
+
+    // Skip empty or very small audio chunks (likely silence)
+    if (!audioData || audioData.length < 10) {
+      if (this.receivedChunkCount % 20 === 0) {
+        console.log('⚠️ ENHANCED LOGGING: Skipping empty or very small audio chunk');
+      }
+      return;
+    }
 
     // Only send audio if transcription is active AND Deepgram is ready
     if (this.transcriptionActive && this.deepgramReady && this.deepgramConnection && this.deepgramConnection.readyState === WebSocket.OPEN) {
       // Deepgram is ready, send immediately
-      console.log('🎤 ENHANCED LOGGING: Deepgram ready - forwarding audio data immediately');
+      if (this.receivedChunkCount % 20 === 0) {
+        console.log('🎤 ENHANCED LOGGING: Deepgram ready - forwarding audio data immediately');
+      }
+      
       try {
         this.deepgramConnection.send(audioData);
-        console.log('🎤 ENHANCED LOGGING: Audio data sent to Deepgram successfully');
+        
+        if (this.receivedChunkCount % 20 === 0) {
+          console.log('🎤 ENHANCED LOGGING: Audio data sent to Deepgram successfully');
+        }
       } catch (error) {
         console.error('❌ ENHANCED LOGGING: Error sending audio to Deepgram:', error);
         this.deepgramReady = false;
@@ -176,14 +194,18 @@ class AblyDeepgramBridge {
       if (this.transcriptionActive) {
         this.bufferAudioData(audioData);
       } else {
-        console.log('⚠️ ENHANCED LOGGING: Transcription not active, discarding audio data');
+        if (this.receivedChunkCount % 20 === 0) {
+          console.log('⚠️ ENHANCED LOGGING: Transcription not active, discarding audio data');
+        }
       }
     }
   }
 
   bufferAudioData(audioData) {
-    console.log('📦 ENHANCED LOGGING: Deepgram not ready - buffering audio data');
-    console.log('📦 ENHANCED LOGGING: Current buffer size:', this.audioBuffer.length);
+    if (this.receivedChunkCount % 20 === 0) {
+      console.log('📦 ENHANCED LOGGING: Deepgram not ready - buffering audio data');
+      console.log('📦 ENHANCED LOGGING: Current buffer size:', this.audioBuffer.length);
+    }
     
     // Initialize buffer start time if this is the first chunk
     if (this.audioBuffer.length === 0) {
@@ -211,7 +233,9 @@ class AblyDeepgramBridge {
       timestamp: Date.now()
     });
     
-    console.log('📦 ENHANCED LOGGING: Audio data buffered, new buffer size:', this.audioBuffer.length);
+    if (this.receivedChunkCount % 20 === 0) {
+      console.log('📦 ENHANCED LOGGING: Audio data buffered, new buffer size:', this.audioBuffer.length);
+    }
     
     // If transcription is active but Deepgram is not connected, try to reconnect
     if (this.transcriptionActive && (!this.deepgramConnection || this.deepgramConnection.readyState !== WebSocket.OPEN)) {
@@ -437,14 +461,16 @@ class AblyDeepgramBridge {
 
     ws.on('message', (data) => {
       try {
-        console.log('📨 ENHANCED LOGGING: Received message from Deepgram');
-        
         const message = JSON.parse(data);
-        console.log('📨 ENHANCED LOGGING: Parsed Deepgram message type:', message.type);
+        
+        // Only log occasionally to reduce noise
+        if (this.receivedChunkCount % 20 === 0) {
+          console.log('📨 ENHANCED LOGGING: Received message from Deepgram');
+          console.log('📨 ENHANCED LOGGING: Parsed Deepgram message type:', message.type);
+        }
         
         if (message.type === 'Results') {
-          console.log('📝 ENHANCED LOGGING: Deepgram Results message received');
-          
+          // Only log when there's actual transcript content
           if (message.channel?.alternatives?.[0]?.transcript) {
             const alternative = message.channel.alternatives[0];
             console.log('📝 ENHANCED LOGGING: Transcript:', alternative.transcript);
@@ -482,7 +508,11 @@ class AblyDeepgramBridge {
             data: message,
             timestamp: Date.now()
           });
-          console.log('📨 ENHANCED LOGGING: Forwarded Deepgram message to web app via Ably');
+          
+          // Only log occasionally to reduce noise
+          if (this.receivedChunkCount % 20 === 0) {
+            console.log('📨 ENHANCED LOGGING: Forwarded Deepgram message to web app via Ably');
+          }
         }
       } catch (error) {
         console.error('❌ ENHANCED LOGGING: Error parsing Deepgram message:', error);

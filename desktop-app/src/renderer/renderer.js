@@ -537,7 +537,12 @@ class DesktopRenderer {
                 if (MediaRecorder.isTypeSupported(mimeType)) {
                     console.log('✅ ENHANCED LOGGING: Attempting MIME type:', mimeType);
                     try {
-                        mediaRecorder = new MediaRecorder(stream, { mimeType });
+                        // ENHANCED: Add better bitrate options
+                        const options = { 
+                            mimeType,
+                            audioBitsPerSecond: 128000 // 128 kbps for better quality
+                        };
+                        mediaRecorder = new MediaRecorder(stream, options);
                         selectedMimeType = mimeType;
                         console.log('✅ ENHANCED LOGGING: Successfully created MediaRecorder with:', mimeType);
                         break;

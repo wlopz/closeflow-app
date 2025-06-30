@@ -180,7 +180,9 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       // Clean up Ably subscriptions
       ablySubscriptionsRef.current.forEach(subscription => {
         try {
-          subscription.unsubscribe();
+          if (subscription && typeof subscription.unsubscribe === 'function') {
+            subscription.unsubscribe();
+          }
         } catch (error) {
           console.error('Error unsubscribing from Ably:', error);
         }
@@ -489,7 +491,9 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       // Clean up Ably subscriptions
       ablySubscriptionsRef.current.forEach(subscription => {
         try {
-          subscription.unsubscribe();
+          if (subscription && typeof subscription.unsubscribe === 'function') {
+            subscription.unsubscribe();
+          }
         } catch (error) {
           console.error('Error unsubscribing from Ably:', error);
         }
@@ -502,6 +506,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       // Reset state
       setIsLive(false);
       setShowFeedback(true);
+      setDesktopCallStarted(false);
       
       // Notify web app that call has stopped
       try {
@@ -531,7 +536,6 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       
     } finally {
       setIsEndingCall(false);
-      setDesktopCallStarted(false);
       
       // Notify parent component
       onCallEnd();
