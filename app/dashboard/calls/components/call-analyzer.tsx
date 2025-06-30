@@ -764,6 +764,24 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
     setDeepgramErrors([]);
   };
   
+  // Group transcripts by speaker for chat bubble display
+  const groupedTranscripts = transcripts.reduce((groups: Transcript[][], transcript, index) => {
+    // If this is the first transcript or the speaker changed from the previous one
+    // or if the previous transcript was final and this one is a new utterance
+    if (
+      index === 0 || 
+      transcript.speaker_id !== transcripts[index - 1].speaker_id ||
+      (transcripts[index - 1].is_final && transcript.is_final)
+    ) {
+      // Start a new group
+      groups.push([transcript]);
+    } else {
+      // Add to the last group
+      groups[groups.length - 1].push(transcript);
+    }
+    return groups;
+  }, []);
+  
   return (
     <>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -820,36 +838,93 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
                     </p>
                   </div>
                 )}
+                
+                {/* Audio status information */}
+                {isLive && transcripts.length === 0 && (
+                  <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md w-full max-w-md">
+                    <h4 className="text-sm font-semibold text-blue-700 dark:text-blue-400 flex items-center gap-2">
+                      <Mic className="h-4 w-4" />
+                      Audio Status
+                    </h4>
+                    <div className="mt-2 text-xs text-blue-600 dark:text-blue-400">
+                      <p className="mb-1">• MIME Type: {mimeType || 'Not detected'}</p>
+                      <p className="mb-1">• Deepgram Connected: {deepgramErrors.length === 0 ? 'Yes' : 'No'}</p>
+                    </div>
+                    <p className="mt-2 text-xs text-blue-600 dark:text-blue-400">
+                      Speak clearly to begin transcription. If no audio is detected, check your microphone settings.
+                    </p>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="space-y-6">
-                {transcripts.map((transcript) => (
-                  <div key={transcript.id} className="flex gap-3">
-                    <div className={cn(
-                      "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium",
-                      transcript.speaker_id === 0 
-                        ? "bg-blue-500 text-white" 
-                        : "bg-green-500 text-white"
-                    )}>
-                      {transcript.speaker_id === 0 ? 'Y' : 'C'}
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-sm font-medium">
-                          {transcript.speaker_name || `Speaker ${transcript.speaker_id + 1}`}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {formatTimestamp(transcript.timestamp_offset)}
-                        </span>
-                        {/* ADDED: Show if transcript is final or interim */}
-                        <Badge variant={transcript.is_final ? "default" : "outline"} className="text-xs">
-                          {transcript.is_final ? "Final" : "Interim"}
-                        </Badge>
+                {/* Render grouped transcripts as chat bubbles */}
+                {groupedTranscripts.map((group, groupIndex) => {
+                  const speaker = group[0].speaker_id;
+                  const isSalesperson = speaker === 0;
+                  
+                  return (
+                    <div 
+                      key={`group-${groupIndex}`} 
+                      className={cn(
+                        "flex w-full",
+                        isSalesperson ? "justify-end" : "justify-start"
+                      )}
+                    >
+                      <div className={cn(
+                        "flex gap-3 max-w-[80%]",
+                        isSalesperson ? "flex-row-reverse" : "flex-row"
+                      )}>
+                        <div className={cn(
+                          "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium",
+                          isSalesperson ? "bg-blue-500 text-white" : "bg-green-500 text-white"
+                        )}>
+                          {isSalesperson ? 'Y' : 'C'}
+                        </div>
+                        
+                        <div className="flex-1 space-y-2">
+                          <div className={cn(
+                            "flex items-center gap-2 mb-1",
+                            isSalesperson ? "justify-end" : "justify-start"
+                          )}>
+                            <span className="text-sm font-medium">
+                              {group[0].speaker_name || `Speaker ${group[0].speaker_id + 1}`}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {formatTimestamp(group[0].timestamp_offset)}
+                            </span>
+                          </div>
+                          
+                          <div className="space-y-1">
+                            {group.map((transcript, index) => (
+                              <div 
+                                key={transcript.id} 
+                                className={cn(
+                                  "p-3 rounded-lg",
+                                  isSalesperson 
+                                    ? "bg-primary/10 text-foreground rounded-tr-none" 
+                                    : "bg-muted text-foreground rounded-tl-none"
+                                )}
+                              >
+                                <div className="flex flex-col">
+                                  <p className="text-sm leading-relaxed">{transcript.content}</p>
+                                  <div className="flex items-center justify-end gap-2 mt-1">
+                                    <Badge 
+                                      variant={transcript.is_final ? "default" : "outline"} 
+                                      className="text-[10px] px-1 py-0 h-4"
+                                    >
+                                      {transcript.is_final ? "Final" : "Interim"}
+                                    </Badge>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
-                      <p className="text-sm leading-relaxed">{transcript.content}</p>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 
                 {/* Loading indicator for new transcripts */}
                 {isProcessing && (
@@ -885,23 +960,6 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
                     ? "AI is analyzing your conversation. Insights will appear here as the call progresses."
                     : "Start a call to receive AI-powered sales coaching insights."}
                 </p>
-                
-                {/* Audio status information */}
-                {isLive && transcripts.length === 0 && (
-                  <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md w-full max-w-md">
-                    <h4 className="text-sm font-semibold text-blue-700 dark:text-blue-400 flex items-center gap-2">
-                      <Mic className="h-4 w-4" />
-                      Audio Status
-                    </h4>
-                    <div className="mt-2 text-xs text-blue-600 dark:text-blue-400">
-                      <p className="mb-1">• MIME Type: {mimeType || 'Not detected'}</p>
-                      <p className="mb-1">• Deepgram Connected: {deepgramErrors.length === 0 ? 'Yes' : 'No'}</p>
-                    </div>
-                    <p className="mt-2 text-xs text-blue-600 dark:text-blue-400">
-                      Speak clearly to begin transcription. If no audio is detected, check your microphone settings.
-                    </p>
-                  </div>
-                )}
               </div>
             ) : (
               <div className="space-y-4">
