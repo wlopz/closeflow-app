@@ -358,6 +358,8 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
           // Subscribe to Deepgram results from desktop
           const resultsSubscription = channels.resultsChannel.subscribe((message) => {
             console.log('📨 ENHANCED LOGGING: Received Deepgram result via Ably:', message.name);
+            // ENHANCED LOGGING: Log the entire message object for debugging
+            console.log('📨 ENHANCED LOGGING: Full Deepgram message:', message);
             handleDeepgramResult(message, newCall.id);
           });
           
@@ -391,11 +393,11 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
             
             const newTranscript = payload.new as Transcript;
             
-            // Only add final transcripts to the UI
-            if (newTranscript.is_final) {
+            // MODIFIED: Show all transcripts for debugging, not just final ones
+            // if (newTranscript.is_final) {
               setTranscripts(prev => [...prev, newTranscript]);
               setLastTranscriptTime(Date.now());
-            }
+            // }
           })
           .subscribe();
         
@@ -547,6 +549,9 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
   // Handle Deepgram results from Ably
   const handleDeepgramResult = async (message: any, callId: string) => {
     try {
+      // ENHANCED LOGGING: Log the entire message object for debugging
+      console.log('🔍 ENHANCED LOGGING: Processing Deepgram result message:', message);
+      
       // CRITICAL FIX: Correctly access the Deepgram data from the Ably message
       // The Deepgram message is nested under message.data.data
       const { data } = message;
@@ -567,8 +572,11 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         const alternative = data.data.channel.alternatives[0];
         const transcript = alternative.transcript.trim();
         
-        if (transcript && data.data.is_final) {
-          console.log('📝 ENHANCED LOGGING: Processing final transcript from Deepgram:', transcript);
+        // MODIFIED: Process all transcripts for debugging, not just final ones
+        // if (transcript && data.data.is_final) {
+        if (transcript) {
+          console.log('📝 ENHANCED LOGGING: Processing transcript from Deepgram:', transcript);
+          console.log('📝 ENHANCED LOGGING: Is final:', data.data.is_final);
           
           // Determine speaker (simplified logic)
           const speakerId = 0; // Default to salesperson for now
@@ -582,15 +590,17 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
             content: transcript,
             timestamp_offset: Math.floor(elapsedTime),
             confidence: alternative.confidence || 0.9,
-            is_final: true
+            is_final: data.data.is_final
           });
           
           if (newTranscript) {
             setTranscripts(prev => [...prev, newTranscript]);
             setLastTranscriptTime(Date.now());
             
-            // Process for AI insights
-            await processTranscript(newTranscript);
+            // Process for AI insights if it's a final transcript
+            if (data.data.is_final) {
+              await processTranscript(newTranscript);
+            }
           }
         }
       }
@@ -776,6 +786,10 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
                         <span className="text-xs text-muted-foreground">
                           {formatTimestamp(transcript.timestamp_offset)}
                         </span>
+                        {/* ADDED: Show if transcript is final or interim */}
+                        <Badge variant={transcript.is_final ? "default" : "outline"} className="text-xs">
+                          {transcript.is_final ? "Final" : "Interim"}
+                        </Badge>
                       </div>
                       <p className="text-sm leading-relaxed">{transcript.content}</p>
                     </div>
