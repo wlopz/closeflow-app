@@ -519,6 +519,12 @@ class DesktopRenderer {
                 throw new Error('No audio tracks found in stream');
             }
             
+            // ENHANCED: Get and log actual audio track settings
+            const trackSettings = audioTracks[0].getSettings();
+            console.log('🎵 ENHANCED LOGGING: Audio track settings:', trackSettings);
+            console.log('🎵 ENHANCED LOGGING: Actual sample rate:', trackSettings.sampleRate);
+            console.log('🎵 ENHANCED LOGGING: Actual channel count:', trackSettings.channelCount);
+            
             console.log('🎵 ENHANCED LOGGING: Audio track details:', audioTracks.map(track => ({
                 id: track.id,
                 label: track.label,
@@ -574,6 +580,15 @@ class DesktopRenderer {
 
             window.closeFlowMediaRecorder = mediaRecorder;
             window.closeFlowActualMimeType = mediaRecorder.mimeType;
+            
+            // Store actual audio settings for Deepgram
+            window.closeFlowAudioSettings = {
+                sampleRate: trackSettings.sampleRate || 48000,
+                channelCount: trackSettings.channelCount || 1,
+                mimeType: mediaRecorder.mimeType
+            };
+            
+            console.log('📊 ENHANCED LOGGING: Stored audio settings for Deepgram:', window.closeFlowAudioSettings);
 
             // NEW: Send audio data via IPC instead of WebSocket
             mediaRecorder.ondataavailable = (event) => {
@@ -609,7 +624,11 @@ class DesktopRenderer {
             // IMPORTANT: We don't start the MediaRecorder here anymore
             // It will be started when we receive the start-audio-transmission message
             
-            return selectedMimeType;
+            return {
+                mimeType: window.closeFlowActualMimeType,
+                sampleRate: window.closeFlowAudioSettings.sampleRate,
+                channelCount: window.closeFlowAudioSettings.channelCount
+            };
 
         } catch (error) {
             console.error('❌ ENHANCED LOGGING: Failed to initialize audio capture:', error);
@@ -685,6 +704,7 @@ class DesktopRenderer {
             
             window.closeFlowMediaRecorder = null;
             window.closeFlowActualMimeType = null;
+            window.closeFlowAudioSettings = null;
             console.log('✅ Audio capture cleanup completed in renderer');
             
         } catch (error) {
@@ -702,15 +722,20 @@ class DesktopRenderer {
 
             // CRITICAL FIX: Initialize and set up system audio capture FIRST
             console.log('🎤 ENHANCED LOGGING: Starting system audio capture in renderer...');
-            const mimeType = await this.initializeSystemAudioCapture();
+            const audioSettings = await this.initializeSystemAudioCapture();
             
             // Wait a moment for MediaRecorder to be fully initialized
             await new Promise(resolve => setTimeout(resolve, 200));
 
-            // CRITICAL FIX: Get the actual MIME type from the MediaRecorder
-            let actualMimeType = mimeType;
+            // ENHANCED: Get the actual audio settings from the MediaRecorder
+            const actualMimeType = audioSettings.mimeType;
+            const actualSampleRate = audioSettings.sampleRate;
+            const actualChannelCount = audioSettings.channelCount;
             
-            console.log('🎤 ENHANCED LOGGING: Using MIME type for call analysis:', actualMimeType);
+            console.log('🎤 ENHANCED LOGGING: Using audio settings for call analysis:');
+            console.log('🎤 ENHANCED LOGGING: MIME type:', actualMimeType);
+            console.log('🎤 ENHANCED LOGGING: Sample rate:', actualSampleRate);
+            console.log('🎤 ENHANCED LOGGING: Channel count:', actualChannelCount);
             
             // NOTE: We don't start the MediaRecorder here anymore
             // It will be started when we receive the start-audio-transmission message
@@ -719,7 +744,9 @@ class DesktopRenderer {
                 inputDeviceId: this.selectedDevices.input,
                 outputDeviceId: this.selectedDevices.output,
                 systemAudioSourceId: this.selectedSystemAudioSource,
-                mimeType: actualMimeType // Pass the actual MIME type
+                mimeType: actualMimeType,
+                sampleRate: actualSampleRate,
+                channelCount: actualChannelCount
             });
             
             if (!result.success) {

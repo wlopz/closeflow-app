@@ -422,6 +422,8 @@ export async function POST(request: NextRequest) {
         console.log('🚀 ENHANCED LOGGING: Desktop requested call start via HTTP');
         console.log('🚀 ENHANCED LOGGING: Device settings:', body.deviceSettings);
         console.log('🎤 ENHANCED LOGGING: MIME type from desktop:', body.deviceSettings?.mimeType);
+        console.log('🎤 ENHANCED LOGGING: Sample rate from desktop:', body.deviceSettings?.sampleRate);
+        console.log('🎤 ENHANCED LOGGING: Channel count from desktop:', body.deviceSettings?.channelCount);
         
         // Get the Deepgram API key from environment
         const deepgramApiKey = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
@@ -446,7 +448,7 @@ export async function POST(request: NextRequest) {
         const startRequestMessage = {
           id: uuidv4(),
           type: 'desktop-call-started',
-          deviceSettings: body.deviceSettings, // This now includes mimeType
+          deviceSettings: body.deviceSettings, // This now includes mimeType, sampleRate, and channelCount
           deepgramApiKey: deepgramApiKey, // Include the API key
           timestamp: body.timestamp
         };

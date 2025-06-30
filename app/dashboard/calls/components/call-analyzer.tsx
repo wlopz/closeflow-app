@@ -14,6 +14,7 @@ import {
   CheckCircle, 
   Lightbulb, 
   MessageSquare, 
+  Mic, 
   Target, 
   TrendingUp, 
   XCircle 
@@ -63,7 +64,10 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
   const [isPollingMessages, setIsPollingMessages] = useState(false);
   const [deepgramApiKey, setDeepgramApiKey] = useState<string | null>(null);
   const [mimeType, setMimeType] = useState<string | null>(null);
+  const [sampleRate, setSampleRate] = useState<number | null>(null);
+  const [channelCount, setChannelCount] = useState<number | null>(null);
   const [desktopCallStarted, setDesktopCallStarted] = useState(false);
+  const [deepgramErrors, setDeepgramErrors] = useState<string[]>([]);
   
   // Refs
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -97,6 +101,8 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         console.log('🚀 ENHANCED LOGGING: Desktop call is active, starting live analysis automatically');
         console.log('🚀 ENHANCED LOGGING: Using Deepgram API key:', deepgramApiKey ? `${deepgramApiKey.substring(0, 8)}...` : 'none');
         console.log('🚀 ENHANCED LOGGING: Using MIME type:', mimeType);
+        console.log('🚀 ENHANCED LOGGING: Using sample rate:', sampleRate);
+        console.log('🚀 ENHANCED LOGGING: Using channel count:', channelCount);
         
         try {
           await startLive();
@@ -113,7 +119,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
     };
 
     handleDesktopCallActivation();
-  }, [desktopCallActive, isLive, user, desktopCallStarted, deepgramApiKey, mimeType]);
+  }, [desktopCallActive, isLive, user, desktopCallStarted, deepgramApiKey, mimeType, sampleRate, channelCount]);
   
   // Timer for elapsed time
   useEffect(() => {
@@ -274,7 +280,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         console.log('🚀 ENHANCED LOGGING: Desktop call started message received');
         console.log('🚀 ENHANCED LOGGING: Device settings:', content.deviceSettings);
         
-        // Store the API key and MIME type for later use
+        // Store the API key and audio parameters for later use
         if (content.deepgramApiKey) {
           setDeepgramApiKey(content.deepgramApiKey);
           console.log('🔑 ENHANCED LOGGING: Stored Deepgram API key:', content.deepgramApiKey ? `${content.deepgramApiKey.substring(0, 8)}...` : 'none');
@@ -282,6 +288,14 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         if (content.deviceSettings?.mimeType) {
           setMimeType(content.deviceSettings.mimeType);
           console.log('🎤 ENHANCED LOGGING: Stored MIME type:', content.deviceSettings.mimeType);
+        }
+        if (content.deviceSettings?.sampleRate) {
+          setSampleRate(content.deviceSettings.sampleRate);
+          console.log('🎤 ENHANCED LOGGING: Stored sample rate:', content.deviceSettings.sampleRate);
+        }
+        if (content.deviceSettings?.channelCount) {
+          setChannelCount(content.deviceSettings.channelCount);
+          console.log('🎤 ENHANCED LOGGING: Stored channel count:', content.deviceSettings.channelCount);
         }
         
         // Mark that we've received the desktop call started message
@@ -314,6 +328,8 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       console.log('🚀 ENHANCED LOGGING: Starting live call analysis');
       console.log('🚀 ENHANCED LOGGING: Deepgram API key available:', !!deepgramApiKey);
       console.log('🚀 ENHANCED LOGGING: MIME type available:', !!mimeType);
+      console.log('🚀 ENHANCED LOGGING: Sample rate available:', !!sampleRate);
+      console.log('🚀 ENHANCED LOGGING: Channel count available:', !!channelCount);
       
       if (!user) {
         toast({
@@ -349,6 +365,8 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
           await channels.controlChannel.publish('start-transcription', {
             deepgramApiKey: deepgramApiKey,
             mimeType: mimeType,
+            sampleRate: sampleRate,
+            channelCount: channelCount,
             callId: newCall.id,
             timestamp: Date.now()
           });
@@ -363,7 +381,22 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
             handleDeepgramResult(message, newCall.id);
           });
           
-          ablySubscriptionsRef.current.push(resultsSubscription);
+          // Subscribe to Deepgram errors from desktop
+          const errorSubscription = channels.resultsChannel.subscribe('deepgram-error', (message) => {
+            console.error('❌ ENHANCED LOGGING: Received Deepgram error via Ably:', message.data);
+            
+            // Add error to state
+            setDeepgramErrors(prev => [...prev, `${message.data.error}: ${message.data.details || 'No details provided'}`]);
+            
+            // Show toast notification
+            toast({
+              title: "Deepgram Error",
+              description: message.data.error || "An error occurred with speech recognition",
+              variant: "destructive"
+            });
+          });
+          
+          ablySubscriptionsRef.current.push(resultsSubscription, errorSubscription);
           console.log('✅ ENHANCED LOGGING: Subscribed to Deepgram results channel');
         } else {
           console.error('❌ ENHANCED LOGGING: Missing required data for Ably communication');
@@ -509,6 +542,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       setIsLive(false);
       setShowFeedback(true);
       setDesktopCallStarted(false);
+      setDeepgramErrors([]);
       
       // Notify web app that call has stopped
       try {
@@ -606,6 +640,16 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       }
     } catch (error) {
       console.error('❌ ENHANCED LOGGING: Error handling Deepgram result:', error);
+      
+      // Add to errors state
+      setDeepgramErrors(prev => [...prev, `Error processing transcript: ${error instanceof Error ? error.message : String(error)}`]);
+      
+      // Show toast notification for critical errors
+      toast({
+        title: "Transcription Error",
+        description: "Failed to process speech recognition result",
+        variant: "destructive"
+      });
     }
   };
   
@@ -728,6 +772,9 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
     setInsights([]);
     setDeepgramApiKey(null);
     setMimeType(null);
+    setSampleRate(null);
+    setChannelCount(null);
+    setDeepgramErrors([]);
   };
   
   return (
@@ -765,6 +812,27 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
                     ? "Waiting for conversation to begin. Start speaking to see the transcript appear here."
                     : "Start a call to begin transcription and analysis."}
                 </p>
+                
+                {/* Display Deepgram errors if any */}
+                {deepgramErrors.length > 0 && (
+                  <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md w-full max-w-md">
+                    <h4 className="text-sm font-semibold text-red-700 dark:text-red-400 flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4" />
+                      Deepgram Connection Issues
+                    </h4>
+                    <ul className="mt-2 text-xs text-red-600 dark:text-red-400 space-y-1">
+                      {deepgramErrors.slice(0, 3).map((error, index) => (
+                        <li key={index} className="ml-4 list-disc">{error}</li>
+                      ))}
+                      {deepgramErrors.length > 3 && (
+                        <li className="ml-4 list-disc">{`${deepgramErrors.length - 3} more errors...`}</li>
+                      )}
+                    </ul>
+                    <p className="mt-2 text-xs text-red-600 dark:text-red-400">
+                      Try checking your microphone and audio settings, or restart the call.
+                    </p>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="space-y-6">
@@ -830,6 +898,25 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
                     ? "AI is analyzing your conversation. Insights will appear here as the call progresses."
                     : "Start a call to receive AI-powered sales coaching insights."}
                 </p>
+                
+                {/* Audio status information */}
+                {isLive && transcripts.length === 0 && (
+                  <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md w-full max-w-md">
+                    <h4 className="text-sm font-semibold text-blue-700 dark:text-blue-400 flex items-center gap-2">
+                      <Mic className="h-4 w-4" />
+                      Audio Status
+                    </h4>
+                    <div className="mt-2 text-xs text-blue-600 dark:text-blue-400">
+                      <p className="mb-1">• MIME Type: {mimeType || 'Not detected'}</p>
+                      <p className="mb-1">• Sample Rate: {sampleRate || '48000'} Hz</p>
+                      <p className="mb-1">• Channels: {channelCount || '1'}</p>
+                      <p className="mb-1">• Deepgram Connected: {deepgramErrors.length === 0 ? 'Yes' : 'No'}</p>
+                    </div>
+                    <p className="mt-2 text-xs text-blue-600 dark:text-blue-400">
+                      Speak clearly to begin transcription. If no audio is detected, check your microphone settings.
+                    </p>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="space-y-4">
