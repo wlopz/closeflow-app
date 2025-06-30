@@ -21,6 +21,9 @@ class DesktopRenderer {
         // NEW: Add system audio capture instance
         this.systemAudioCapture = null;
         
+        // NEW: Flag to track if audio transmission is active
+        this.isAudioTransmissionActive = false;
+        
         this.initializeElements();
         this.setupEventListeners();
         this.loadInitialData();
@@ -85,6 +88,18 @@ class DesktopRenderer {
             if (this.audioPlaybackEnabled) {
                 this.processAudioChunk(audioData);
             }
+        });
+        
+        // NEW: Listen for start-audio-transmission signal
+        ipcRenderer.on('start-audio-transmission', () => {
+            console.log('🎤 ENHANCED LOGGING: Received start-audio-transmission signal');
+            this.startAudioTransmission();
+        });
+        
+        // NEW: Listen for stop-audio-transmission signal
+        ipcRenderer.on('stop-audio-transmission', () => {
+            console.log('🛑 ENHANCED LOGGING: Received stop-audio-transmission signal');
+            this.stopAudioTransmission();
         });
 
         // Button listeners
@@ -432,7 +447,7 @@ class DesktopRenderer {
         return source ? `${source.name} (${source.type})` : 'Unknown Source';
     }
 
-    // NEW: Initialize and start system audio capture in renderer
+    // MODIFIED: Initialize system audio capture in renderer but don't start recording yet
     async initializeSystemAudioCapture() {
         if (!this.selectedSystemAudioSource) {
             throw new Error('No system audio source selected');
@@ -575,16 +590,66 @@ class DesktopRenderer {
             mediaRecorder.onstart = () => {
                 console.log('▶️ ENHANCED LOGGING: MediaRecorder started successfully');
             };
-
-            console.log('🎤 ENHANCED LOGGING: About to start MediaRecorder...');
-            mediaRecorder.start(500); // 500ms chunks
             
-            console.log('✅ ENHANCED LOGGING: Audio capture started successfully with IPC');
-            return true;
+            console.log('✅ ENHANCED LOGGING: Audio capture initialized successfully with IPC');
+            
+            // IMPORTANT: We don't start the MediaRecorder here anymore
+            // It will be started when we receive the start-audio-transmission message
+            
+            return selectedMimeType;
 
         } catch (error) {
-            console.error('❌ ENHANCED LOGGING: Failed to start audio capture:', error);
+            console.error('❌ ENHANCED LOGGING: Failed to initialize audio capture:', error);
             throw error;
+        }
+    }
+    
+    // NEW: Start audio transmission when Deepgram is ready
+    startAudioTransmission() {
+        console.log('🎤 ENHANCED LOGGING: Starting audio transmission');
+        
+        if (!window.closeFlowMediaRecorder) {
+            console.error('❌ ENHANCED LOGGING: MediaRecorder not initialized');
+            return false;
+        }
+        
+        if (window.closeFlowMediaRecorder.state === 'recording') {
+            console.log('⚠️ ENHANCED LOGGING: MediaRecorder already recording');
+            return true;
+        }
+        
+        try {
+            console.log('🎤 ENHANCED LOGGING: Starting MediaRecorder...');
+            window.closeFlowMediaRecorder.start(500); // 500ms chunks
+            this.isAudioTransmissionActive = true;
+            console.log('✅ ENHANCED LOGGING: MediaRecorder started successfully');
+            return true;
+        } catch (error) {
+            console.error('❌ ENHANCED LOGGING: Error starting MediaRecorder:', error);
+            return false;
+        }
+    }
+    
+    // NEW: Stop audio transmission
+    stopAudioTransmission() {
+        console.log('🛑 ENHANCED LOGGING: Stopping audio transmission');
+        
+        if (!window.closeFlowMediaRecorder) {
+            console.log('⚠️ ENHANCED LOGGING: No MediaRecorder to stop');
+            return;
+        }
+        
+        if (window.closeFlowMediaRecorder.state === 'inactive') {
+            console.log('⚠️ ENHANCED LOGGING: MediaRecorder already inactive');
+            return;
+        }
+        
+        try {
+            window.closeFlowMediaRecorder.stop();
+            this.isAudioTransmissionActive = false;
+            console.log('✅ ENHANCED LOGGING: MediaRecorder stopped successfully');
+        } catch (error) {
+            console.error('❌ ENHANCED LOGGING: Error stopping MediaRecorder:', error);
         }
     }
 
@@ -593,10 +658,8 @@ class DesktopRenderer {
         console.log('🛑 ENHANCED LOGGING: Stopping system audio capture in renderer');
 
         try {
-            if (window.closeFlowMediaRecorder && window.closeFlowMediaRecorder.state !== 'inactive') {
-                console.log('🛑 Stopping MediaRecorder...');
-                window.closeFlowMediaRecorder.stop();
-            }
+            // First stop the MediaRecorder if it's active
+            this.stopAudioTransmission();
             
             if (window.closeFlowSystemStream) {
                 console.log('🛑 Stopping audio tracks...');
@@ -624,31 +687,26 @@ class DesktopRenderer {
             this.updateButtonStates();
             this.updateAnalysisStatus();
 
-            // CRITICAL FIX: Initialize and start system audio capture FIRST
+            // CRITICAL FIX: Initialize and set up system audio capture FIRST
             console.log('🎤 ENHANCED LOGGING: Starting system audio capture in renderer...');
-            await this.initializeSystemAudioCapture();
+            const mimeType = await this.initializeSystemAudioCapture();
             
             // Wait a moment for MediaRecorder to be fully initialized
             await new Promise(resolve => setTimeout(resolve, 200));
 
             // CRITICAL FIX: Get the actual MIME type from the MediaRecorder
-            let actualMimeType = null;
+            let actualMimeType = mimeType;
             
-            console.log('🎤 ENHANCED LOGGING: Attempting to retrieve MIME type from window.closeFlowActualMimeType');
+            console.log('🎤 ENHANCED LOGGING: Using MIME type for call analysis:', actualMimeType);
             
-            // Check if the MIME type was set by the audio capture process
-            if (window.closeFlowActualMimeType) {
-                actualMimeType = window.closeFlowActualMimeType;
-                console.log('✅ ENHANCED LOGGING: Retrieved MIME type from window:', actualMimeType);
-            } else {
-                console.log('⚠️ ENHANCED LOGGING: No MIME type found in window.closeFlowActualMimeType');
-            }
+            // NOTE: We don't start the MediaRecorder here anymore
+            // It will be started when we receive the start-audio-transmission message
 
             const result = await ipcRenderer.invoke('start-call-analysis', {
                 inputDeviceId: this.selectedDevices.input,
                 outputDeviceId: this.selectedDevices.output,
                 systemAudioSourceId: this.selectedSystemAudioSource,
-                mimeType: actualMimeType // Pass the actual MIME type (or null if not available)
+                mimeType: actualMimeType // Pass the actual MIME type
             });
             
             if (!result.success) {

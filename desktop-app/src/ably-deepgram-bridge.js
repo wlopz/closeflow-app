@@ -35,6 +35,9 @@ class AblyDeepgramBridge {
     
     // Track received chunk count
     this.receivedChunkCount = 0;
+    
+    // Add callback for Deepgram connection status
+    this.onDeepgramConnected = null;
   }
 
   async initialize(ablyApiKey) {
@@ -97,6 +100,12 @@ class AblyDeepgramBridge {
     this.resultsChannel = this.ablyClient.channels.get('closeflow:deepgram-results');
 
     console.log('✅ ENHANCED LOGGING: Ably channels set up successfully');
+  }
+
+  // Set callback for Deepgram connection status
+  setDeepgramConnectedCallback(callback) {
+    this.onDeepgramConnected = callback;
+    console.log('✅ ENHANCED LOGGING: Set Deepgram connection callback');
   }
 
   // Updated handleControlMessage to extract and use mimeType
@@ -417,6 +426,12 @@ class AblyDeepgramBridge {
           timestamp: Date.now()
         });
         console.log('✅ ENHANCED LOGGING: Notified web app via Ably that Deepgram is connected');
+      }
+      
+      // Call the callback if provided
+      if (this.onDeepgramConnected && typeof this.onDeepgramConnected === 'function') {
+        console.log('🔔 ENHANCED LOGGING: Calling Deepgram connected callback');
+        this.onDeepgramConnected();
       }
     });
 

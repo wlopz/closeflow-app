@@ -481,7 +481,7 @@ export async function POST(request: NextRequest) {
           console.error('❌ ENHANCED LOGGING: Error updating desktop sync state:', startPingError);
         }
 
-        console.log('✅ ENHANCED LOGGING: Desktop start request processed successfully');
+        console.log('✅ ENHANCED LOGGING: Desktop request to start call analysis sent to web app');
         console.log('🚨 CRITICAL DEBUG: Returning success response to desktop');
         return Response.json({ success: true, message: 'Start request received and will be processed by web app' });
 

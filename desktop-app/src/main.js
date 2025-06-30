@@ -44,6 +44,9 @@ class CloseFlowDesktop {
     this.webAppPingInterval = null;
     this.webAppPingIntervalMs = 5000; // 5 seconds
     
+    // NEW: Flag to track if Deepgram is connected
+    this.deepgramConnected = false;
+    
     console.log('🔑 ENHANCED LOGGING: Ably API key present:', !!this.ablyApiKey);
   }
 
@@ -99,6 +102,19 @@ class CloseFlowDesktop {
 
     try {
       this.ablyDeepgramBridge = new AblyDeepgramBridge();
+      
+      // Set callback for Deepgram connection
+      this.ablyDeepgramBridge.setDeepgramConnectedCallback(() => {
+        console.log('🎉 ENHANCED LOGGING: Deepgram connected callback received');
+        this.deepgramConnected = true;
+        
+        // Notify renderer to start audio transmission
+        if (this.isRendererSafe()) {
+          this.mainWindow.webContents.send('start-audio-transmission');
+          console.log('🎤 ENHANCED LOGGING: Sent start-audio-transmission to renderer');
+        }
+      });
+      
       await this.ablyDeepgramBridge.initialize(this.ablyApiKey);
       
       console.log('✅ ENHANCED LOGGING: Ably Deepgram Bridge initialized successfully');
@@ -354,11 +370,24 @@ class CloseFlowDesktop {
           isStartingCall: this.isStartingCall,
           isStoppingCall: this.isStoppingCall,
           webAppUrl: this.webAppUrl,
-          ablyConnected: this.ablyDeepgramBridge ? true : false
+          ablyConnected: this.ablyDeepgramBridge ? true : false,
+          deepgramConnected: this.deepgramConnected
         };
       } catch (error) {
         console.error('Error in get-status handler:', error);
         throw error;
+      }
+    });
+    
+    // NEW: Add IPC handler for Deepgram connection status
+    ipcMain.on('deepgram-connected', () => {
+      console.log('🎉 ENHANCED LOGGING: Received deepgram-connected IPC message');
+      this.deepgramConnected = true;
+      
+      // Notify renderer to start audio transmission
+      if (this.isRendererSafe()) {
+        this.mainWindow.webContents.send('start-audio-transmission');
+        console.log('🎤 ENHANCED LOGGING: Sent start-audio-transmission to renderer');
       }
     });
   }
@@ -999,6 +1028,15 @@ class CloseFlowDesktop {
         isStoppingCall: this.isStoppingCall
       });
       
+      // Tell renderer to stop audio capture
+      if (this.isRendererSafe()) {
+        this.mainWindow.webContents.send('stop-audio-transmission');
+        console.log('🛑 ENHANCED LOGGING: Sent stop-audio-transmission to renderer');
+      }
+      
+      // Reset Deepgram connection status
+      this.deepgramConnected = false;
+      
       // Send stop command to web app via HTTP POST
       console.log('🛑 ENHANCED LOGGING: Sending stop request to web app');
       
@@ -1091,6 +1129,10 @@ class CloseFlowDesktop {
         { type: 'separator' },
         {
           label: `Ably: ${this.isConnected ? 'Connected' : 'Disconnected'}`,
+          enabled: false
+        },
+        {
+          label: `Deepgram: ${this.deepgramConnected ? 'Connected' : 'Disconnected'}`,
           enabled: false
         },
         { type: 'separator' },
