@@ -48,6 +48,14 @@ interface Insight {
   timestamp_offset: number;
 }
 
+interface TranscriptGroup {
+  speaker_id: number;
+  speaker_name: string;
+  transcripts: Transcript[];
+  timestamp_offset: number;
+  is_final: boolean;
+}
+
 export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps) {
   // State
   const [isLive, setIsLive] = useState(false);
@@ -68,7 +76,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
   const [deepgramErrors, setDeepgramErrors] = useState<string[]>([]);
   
   // Refs
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const messagePollingRef = useRef<NodeJS.Timeout | null>(null);
   const transcriptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -139,10 +147,10 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
     };
   }, [isLive]);
   
-  // Auto-scroll to bottom when new transcripts arrive
+  // Auto-scroll to top when new transcripts arrive (since latest is at top)
   useEffect(() => {
     if (scrollRef.current && transcripts.length > 0) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      scrollRef.current.scrollTop = 0;
     }
   }, [transcripts]);
   
@@ -765,22 +773,28 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
   };
   
   // Group transcripts by speaker for chat bubble display
-  const groupedTranscripts = transcripts.reduce((groups: Transcript[][], transcript, index) => {
+  const groupedTranscripts = transcripts.reduce((groups: TranscriptGroup[], transcript, index) => {
     // If this is the first transcript or the speaker changed from the previous one
-    // or if the previous transcript was final and this one is a new utterance
-    if (
-      index === 0 || 
-      transcript.speaker_id !== transcripts[index - 1].speaker_id ||
-      (transcripts[index - 1].is_final && transcript.is_final)
-    ) {
+    if (index === 0 || transcript.speaker_id !== transcripts[index - 1].speaker_id) {
       // Start a new group
-      groups.push([transcript]);
+      groups.push({
+        speaker_id: transcript.speaker_id,
+        speaker_name: transcript.speaker_name,
+        transcripts: [transcript],
+        timestamp_offset: transcript.timestamp_offset,
+        is_final: transcript.is_final
+      });
     } else {
-      // Add to the last group
-      groups[groups.length - 1].push(transcript);
+      // Add to the last group and update the group's final status
+      const lastGroup = groups[groups.length - 1];
+      lastGroup.transcripts.push(transcript);
+      lastGroup.is_final = transcript.is_final; // Update to latest transcript's final status
     }
     return groups;
   }, []);
+  
+  // Reverse the groups so latest conversation appears at the top
+  const reversedGroups = [...groupedTranscripts].reverse();
   
   return (
     <>
@@ -858,10 +872,12 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
               </div>
             ) : (
               <div className="space-y-6">
-                {/* Render grouped transcripts as chat bubbles */}
-                {groupedTranscripts.map((group, groupIndex) => {
-                  const speaker = group[0].speaker_id;
-                  const isSalesperson = speaker === 0;
+                {/* Render grouped transcripts as chat bubbles (latest at top) */}
+                {reversedGroups.map((group, groupIndex) => {
+                  const isSalesperson = group.speaker_id === 0;
+                  
+                  // Combine all transcript content in the group
+                  const combinedContent = group.transcripts.map(t => t.content).join(' ');
                   
                   return (
                     <div 
@@ -888,37 +904,30 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
                             isSalesperson ? "justify-end" : "justify-start"
                           )}>
                             <span className="text-sm font-medium">
-                              {group[0].speaker_name || `Speaker ${group[0].speaker_id + 1}`}
+                              {group.speaker_name || `Speaker ${group.speaker_id + 1}`}
                             </span>
                             <span className="text-xs text-muted-foreground">
-                              {formatTimestamp(group[0].timestamp_offset)}
+                              {formatTimestamp(group.timestamp_offset)}
                             </span>
                           </div>
                           
-                          <div className="space-y-1">
-                            {group.map((transcript, index) => (
-                              <div 
-                                key={transcript.id} 
-                                className={cn(
-                                  "p-3 rounded-lg",
-                                  isSalesperson 
-                                    ? "bg-primary/10 text-foreground rounded-tr-none" 
-                                    : "bg-muted text-foreground rounded-tl-none"
-                                )}
-                              >
-                                <div className="flex flex-col">
-                                  <p className="text-sm leading-relaxed">{transcript.content}</p>
-                                  <div className="flex items-center justify-end gap-2 mt-1">
-                                    <Badge 
-                                      variant={transcript.is_final ? "default" : "outline"} 
-                                      className="text-[10px] px-1 py-0 h-4"
-                                    >
-                                      {transcript.is_final ? "Final" : "Interim"}
-                                    </Badge>
-                                  </div>
-                                </div>
+                          <div className={cn(
+                            "p-3 rounded-lg",
+                            isSalesperson 
+                              ? "bg-primary/10 text-foreground rounded-tr-none" 
+                              : "bg-muted text-foreground rounded-tl-none"
+                          )}>
+                            <div className="flex flex-col">
+                              <p className="text-sm leading-relaxed">{combinedContent}</p>
+                              <div className="flex items-center justify-end gap-2 mt-1">
+                                <Badge 
+                                  variant={group.is_final ? "default" : "outline"} 
+                                  className="text-[10px] px-1 py-0 h-4"
+                                >
+                                  {group.is_final ? "Final" : "Interim"}
+                                </Badge>
                               </div>
-                            ))}
+                            </div>
                           </div>
                         </div>
                       </div>
