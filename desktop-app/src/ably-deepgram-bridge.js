@@ -47,6 +47,8 @@ class AblyDeepgramBridge {
     this.audioVerificationSampleCount = 0;
     this.maxAudioVerificationSamples = 10;
     this.audioVerificationPath = path.join(os.tmpdir(), 'deepgram-audio-verification');
+    this.audioVerificationBuffer = [];
+    this.audioVerificationBufferSize = 100 * 1024; // 100 KB
     
     // Create verification directory if it doesn't exist
     if (this.audioVerificationEnabled) {
@@ -258,20 +260,37 @@ class AblyDeepgramBridge {
   saveAudioSampleForVerification(audioData) {
     if (!this.audioVerificationEnabled) return;
     
-    // Only save a limited number of samples
-    if (this.audioVerificationSampleCount >= this.maxAudioVerificationSamples) return;
-    
     try {
-      // Save every 10th chunk to reduce the number of files
-      if (this.receivedChunkCount % 10 === 0) {
+      // Add to verification buffer
+      this.audioVerificationBuffer.push(audioData);
+      
+      // Calculate current buffer size
+      const currentBufferSize = this.audioVerificationBuffer.reduce((size, chunk) => size + chunk.length, 0);
+      
+      // Check if buffer is large enough or if we've reached a certain number of chunks
+      if (currentBufferSize >= this.audioVerificationBufferSize || this.audioVerificationBuffer.length >= 20) {
+        // Only save a limited number of samples
+        if (this.audioVerificationSampleCount >= this.maxAudioVerificationSamples) {
+          // Clear buffer but don't save
+          this.audioVerificationBuffer = [];
+          return;
+        }
+        
         const timestamp = Date.now();
         const filePath = path.join(this.audioVerificationPath, `audio-sample-${timestamp}.webm`);
         
-        fs.writeFileSync(filePath, audioData);
+        // Concatenate all buffered chunks
+        const combinedBuffer = Buffer.concat(this.audioVerificationBuffer);
+        
+        // Write to file
+        fs.writeFileSync(filePath, combinedBuffer);
         this.audioVerificationSampleCount++;
         
         console.log('💾 ENHANCED LOGGING: Saved audio sample for verification:', filePath);
-        console.log('💾 ENHANCED LOGGING: Sample size:', audioData.length, 'bytes');
+        console.log('💾 ENHANCED LOGGING: Sample size:', combinedBuffer.length, 'bytes');
+        
+        // Clear the buffer
+        this.audioVerificationBuffer = [];
         
         // If we've reached the max samples, log the verification instructions
         if (this.audioVerificationSampleCount >= this.maxAudioVerificationSamples) {
@@ -854,6 +873,9 @@ class AblyDeepgramBridge {
       clearTimeout(this.deepgramReconnectTimer);
       this.deepgramReconnectTimer = null;
     }
+
+    // Clear audio verification buffer
+    this.audioVerificationBuffer = [];
 
     // Close Ably connection
     if (this.ablyClient) {
