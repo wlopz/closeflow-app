@@ -11,15 +11,23 @@ class DesktopRenderer {
         this.connectionStatus = 'connecting';
         this.isStartingCall = false;
         this.isStoppingCall = false;
+        this.isShuttingDown = false;
         
-        // Audio debug properties
-        this.audioPlaybackEnabled = false;
-        this.audioChunks = [];
-        this.mediaRecorder = null;
-        this.audioPlayer = null;
+        // Add flag to track if renderer is ready
+        this.rendererReady = false;
         
-        // NEW: Add system audio capture instance
-        this.systemAudioCapture = null;
+        // Add retry mechanism for connection
+        this.connectionRetryCount = 0;
+        this.maxConnectionRetries = 5;
+        this.connectionRetryDelay = 2000;
+
+        // NEW: Ably integration
+        this.ablyDeepgramBridge = null;
+        this.ablyApiKey = process.env.ABLY_API_KEY || null;
+        
+        // NEW: Periodic ping to web app
+        this.webAppPingInterval = null;
+        this.webAppPingIntervalMs = 5000; // 5 seconds
         
         // NEW: Flag to track if audio transmission is active
         this.isAudioTransmissionActive = false;
@@ -567,7 +575,7 @@ class DesktopRenderer {
             window.closeFlowMediaRecorder = mediaRecorder;
             window.closeFlowActualMimeType = mediaRecorder.mimeType;
 
-            // Set up audio data handling
+            // NEW: Send audio data via IPC instead of WebSocket
             mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
                     console.log('🎤 ENHANCED LOGGING: Sending audio data via IPC');
@@ -595,7 +603,7 @@ class DesktopRenderer {
             mediaRecorder.onstart = () => {
                 console.log('▶️ ENHANCED LOGGING: MediaRecorder started successfully');
             };
-            
+
             console.log('✅ ENHANCED LOGGING: Audio capture initialized successfully with IPC');
             
             // IMPORTANT: We don't start the MediaRecorder here anymore

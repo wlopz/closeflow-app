@@ -296,7 +296,6 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         if (isLive) {
           await stopLive();
         }
-        
         break;
         
       default:
