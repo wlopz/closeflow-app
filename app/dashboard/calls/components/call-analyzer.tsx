@@ -24,6 +24,7 @@ import { useAuth } from '@/lib/supabase/hooks';
 import { CallsService } from '@/lib/supabase/calls';
 import { supabase } from '@/lib/supabase/client';
 import { getAblyChannels, isAblyAvailable } from '@/lib/ably/client';
+import { cn } from '@/lib/utils';
 
 interface CallAnalyzerProps {
   onCallEnd: () => void;
@@ -547,13 +548,27 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
   // Handle Deepgram results from Ably
   const handleDeepgramResult = async (message: any, callId: string) => {
     try {
+      // CRITICAL FIX: Correctly access the Deepgram data from the Ably message
+      // The Deepgram message is nested under message.data.data
       const { data } = message;
       
-      if (data.type === 'Results' && data.channel?.alternatives?.[0]?.transcript) {
-        const alternative = data.channel.alternatives[0];
+      // Check if this is a connection status message
+      if (message.name === 'deepgram-connected') {
+        console.log('🔗 ENHANCED LOGGING: Received Deepgram connected status');
+        return;
+      }
+      
+      if (message.name === 'deepgram-disconnected') {
+        console.log('🔗 ENHANCED LOGGING: Received Deepgram disconnected status');
+        return;
+      }
+      
+      // For actual transcription results
+      if (message.name === 'deepgram-result' && data.data?.type === 'Results' && data.data.channel?.alternatives?.[0]?.transcript) {
+        const alternative = data.data.channel.alternatives[0];
         const transcript = alternative.transcript.trim();
         
-        if (transcript && data.is_final) {
+        if (transcript && data.data.is_final) {
           console.log('📝 ENHANCED LOGGING: Processing final transcript from Deepgram:', transcript);
           
           // Determine speaker (simplified logic)
@@ -842,9 +857,4 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       )}
     </>
   );
-}
-
-// Utility function for class names
-function cn(...classes: (string | boolean | undefined)[]) {
-  return classes.filter(Boolean).join(' ');
 }
