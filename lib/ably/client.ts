@@ -10,7 +10,7 @@ if (!ablyApiKey) {
 export const ablyClient = ablyApiKey ? new Ably.Realtime({
   key: ablyApiKey,
   clientId: `webapp-${Date.now()}`,
-  log: { level: 1 }
+  // log: { level: 1 }
 }) : null;
 
 // Export channels for use in components
