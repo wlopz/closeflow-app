@@ -6,9 +6,7 @@ const os = require('os');
 
 class AblyDeepgramBridge {
   constructor() {
-    console.log('🚀 ENHANCED LOGGING: AblyDeepgramBridge constructor called');
-    console.log('🚀 ENHANCED LOGGING: Process PID:', process.pid);
-    console.log('🚀 ENHANCED LOGGING: Current time:', new Date().toISOString());
+    console.log('🚀 AblyDeepgramBridge constructor called');
     
     this.ablyClient = null;
     this.controlChannel = null;
@@ -56,9 +54,9 @@ class AblyDeepgramBridge {
         if (!fs.existsSync(this.audioVerificationPath)) {
           fs.mkdirSync(this.audioVerificationPath, { recursive: true });
         }
-        console.log('✅ ENHANCED LOGGING: Audio verification directory created at:', this.audioVerificationPath);
+        console.log('✅ Audio verification directory created at:', this.audioVerificationPath);
       } catch (error) {
-        console.error('❌ ENHANCED LOGGING: Failed to create audio verification directory:', error);
+        console.error('❌ Failed to create audio verification directory:', error);
         this.audioVerificationEnabled = false;
       }
     }
@@ -81,8 +79,7 @@ class AblyDeepgramBridge {
   }
 
   async initialize(ablyApiKey) {
-    console.log('🔗 ENHANCED LOGGING: Initializing Ably connection');
-    console.log('🔗 ENHANCED LOGGING: API key present:', !!ablyApiKey);
+    console.log('🔗 Initializing Ably connection');
     
     if (!ablyApiKey) {
       throw new Error('Ably API key is required');
@@ -99,12 +96,12 @@ class AblyDeepgramBridge {
       // Wait for connection
       await new Promise((resolve, reject) => {
         this.ablyClient.connection.on('connected', () => {
-          console.log('✅ ENHANCED LOGGING: Connected to Ably');
+          console.log('✅ Connected to Ably');
           resolve();
         });
 
         this.ablyClient.connection.on('failed', (error) => {
-          console.error('❌ ENHANCED LOGGING: Ably connection failed:', error);
+          console.error('❌ Ably connection failed:', error);
           reject(error);
         });
 
@@ -115,11 +112,11 @@ class AblyDeepgramBridge {
       // Set up channels
       this.setupChannels();
       
-      console.log('✅ ENHANCED LOGGING: Ably Deepgram Bridge initialized successfully');
+      console.log('✅ Ably Deepgram Bridge initialized successfully');
       return true;
 
     } catch (error) {
-      console.error('❌ ENHANCED LOGGING: Failed to initialize Ably:', error);
+      console.error('❌ Failed to initialize Ably:', error);
       throw error;
     }
   }
@@ -127,11 +124,11 @@ class AblyDeepgramBridge {
   // Set callback for Deepgram connection status
   setDeepgramConnectedCallback(callback) {
     this.onDeepgramConnected = callback;
-    console.log('✅ ENHANCED LOGGING: Set Deepgram connection callback');
+    console.log('✅ Set Deepgram connection callback');
   }
 
   setupChannels() {
-    console.log('📡 ENHANCED LOGGING: Setting up Ably channels');
+    console.log('📡 Setting up Ably channels');
 
     // Control channel - receives commands from web app
     this.controlChannel = this.ablyClient.channels.get('closeflow:desktop-control');
@@ -145,16 +142,16 @@ class AblyDeepgramBridge {
     // Results channel - publishes Deepgram results to web app
     this.resultsChannel = this.ablyClient.channels.get('closeflow:deepgram-results');
 
-    console.log('✅ ENHANCED LOGGING: Ably channels set up successfully');
+    console.log('✅ Ably channels set up successfully');
   }
 
   // Updated handleControlMessage to extract and use mimeType, sampleRate, and channelCount
   handleControlMessage(message) {
-    console.log('📨 ENHANCED LOGGING: Received control message:', message.name, message.data);
+    console.log('📨 Received control message:', message.name, message.data);
 
     switch (message.name) {
       case 'start-transcription':
-        console.log('🔗 ENHANCED LOGGING: Web app requested transcription start');
+        console.log('🔗 Web app requested transcription start');
         
         this.deepgramApiKey = message.data.deepgramApiKey;
         const mimeType = message.data.mimeType; // Extract MIME type
@@ -170,30 +167,29 @@ class AblyDeepgramBridge {
           container: 'webm' // Default, will be updated based on mimeType
         };
         
-        console.log('🔑 ENHANCED LOGGING: Stored deepgramApiKey:', !!this.deepgramApiKey);
-        console.log('🎤 ENHANCED LOGGING: Received MIME type:', mimeType);
-        console.log('🎤 ENHANCED LOGGING: Received sample rate:', sampleRate);
-        console.log('🎤 ENHANCED LOGGING: Received channel count:', channelCount);
-        console.log('🔑 ENHANCED LOGGING: Transcription active:', this.transcriptionActive);
+        console.log('🔑 Stored deepgramApiKey:', !!this.deepgramApiKey);
+        console.log('🎤 Received MIME type:', mimeType);
+        console.log('🎤 Received sample rate:', sampleRate);
+        console.log('🎤 Received channel count:', channelCount);
+        console.log('🔑 Transcription active:', this.transcriptionActive);
         
         // Start connection when transcription is requested
         if (this.transcriptionActive && this.deepgramApiKey) {
-          console.log('🔑 ENHANCED LOGGING: Starting Deepgram connection with audio parameters');
+          console.log('🔑 Starting Deepgram connection with audio parameters');
           this.startDeepgramConnection(mimeType, sampleRate, channelCount);
         } else {
-          console.error('❌ ENHANCED LOGGING: Cannot start Deepgram - missing requirements');
+          console.error('❌ Cannot start Deepgram - missing requirements');
         }
         break;
         
       case 'stop-transcription':
-        console.log('🛑 ENHANCED LOGGING: Web app requested transcription stop');
+        console.log('🛑 Web app requested transcription stop');
         this.transcriptionActive = false;
         this.stopDeepgramConnection();
         break;
         
       default:
-        console.log('❓ ENHANCED LOGGING: Unknown control message:', message.name);
-        console.log('❓ ENHANCED LOGGING: Full unknown message:', message);
+        console.log('❓ Unknown control message:', message.name);
     }
   }
 
@@ -204,21 +200,14 @@ class AblyDeepgramBridge {
     
     // Skip logging for every chunk to reduce noise
     if (this.receivedChunkCount % 20 === 0) {
-      console.log('🎤 ENHANCED LOGGING: Received audio data from desktop');
-      console.log('🎤 ENHANCED LOGGING: Audio data size:', audioData.length);
-      console.log('🎤 ENHANCED LOGGING: Audio data type:', typeof audioData);
-      console.log('🎤 ENHANCED LOGGING: Is Buffer:', Buffer.isBuffer(audioData));
-      console.log('🎤 ENHANCED LOGGING: Deepgram connection exists:', !!this.deepgramConnection);
-      console.log('🎤 ENHANCED LOGGING: Deepgram ready flag:', this.deepgramReady);
-      console.log('🎤 ENHANCED LOGGING: Transcription active flag:', this.transcriptionActive);
-      console.log('🎤 ENHANCED LOGGING: Total chunks received:', this.receivedChunkCount);
+      console.log('🎤 Received audio data from desktop');
+      console.log('🎤 Audio data size:', audioData.length);
+      console.log('🎤 Deepgram ready flag:', this.deepgramReady);
+      console.log('🎤 Total chunks received:', this.receivedChunkCount);
     }
 
     // Skip empty or very small audio chunks (likely silence)
     if (!audioData || audioData.length < 10) {
-      if (this.receivedChunkCount % 20 === 0) {
-        console.log('⚠️ ENHANCED LOGGING: Skipping empty or very small audio chunk');
-      }
       return;
     }
 
@@ -228,18 +217,10 @@ class AblyDeepgramBridge {
     // Only send audio if transcription is active AND Deepgram is ready
     if (this.transcriptionActive && this.deepgramReady && this.deepgramConnection && this.deepgramConnection.readyState === WebSocket.OPEN) {
       // Deepgram is ready, send immediately
-      if (this.receivedChunkCount % 20 === 0) {
-        console.log('🎤 ENHANCED LOGGING: Deepgram ready - forwarding audio data immediately');
-      }
-      
       try {
         this.deepgramConnection.send(audioData);
-        
-        if (this.receivedChunkCount % 20 === 0) {
-          console.log('🎤 ENHANCED LOGGING: Audio data sent to Deepgram successfully');
-        }
       } catch (error) {
-        console.error('❌ ENHANCED LOGGING: Error sending audio to Deepgram:', error);
+        console.error('❌ Error sending audio to Deepgram:', error);
         this.deepgramReady = false;
         this.bufferAudioData(audioData);
         this.scheduleDeepgramReconnect();
@@ -248,10 +229,6 @@ class AblyDeepgramBridge {
       // Deepgram not ready or transcription not active, buffer the audio data
       if (this.transcriptionActive) {
         this.bufferAudioData(audioData);
-      } else {
-        if (this.receivedChunkCount % 20 === 0) {
-          console.log('⚠️ ENHANCED LOGGING: Transcription not active, discarding audio data');
-        }
       }
     }
   }
@@ -286,8 +263,8 @@ class AblyDeepgramBridge {
         fs.writeFileSync(filePath, combinedBuffer);
         this.audioVerificationSampleCount++;
         
-        console.log('💾 ENHANCED LOGGING: Saved audio sample for verification:', filePath);
-        console.log('💾 ENHANCED LOGGING: Sample size:', combinedBuffer.length, 'bytes');
+        console.log('💾 Saved audio sample for verification:', filePath);
+        console.log('💾 Sample size:', combinedBuffer.length, 'bytes');
         
         // Clear the buffer
         this.audioVerificationBuffer = [];
@@ -302,34 +279,28 @@ class AblyDeepgramBridge {
         }
       }
     } catch (error) {
-      console.error('❌ ENHANCED LOGGING: Error saving audio sample:', error);
+      console.error('❌ Error saving audio sample:', error);
       // Disable verification if there's an error
       this.audioVerificationEnabled = false;
     }
   }
 
   bufferAudioData(audioData) {
-    if (this.receivedChunkCount % 20 === 0) {
-      console.log('📦 ENHANCED LOGGING: Deepgram not ready - buffering audio data');
-      console.log('📦 ENHANCED LOGGING: Current buffer size:', this.audioBuffer.length);
-    }
-    
     // Initialize buffer start time if this is the first chunk
     if (this.audioBuffer.length === 0) {
       this.bufferStartTime = Date.now();
-      console.log('📦 ENHANCED LOGGING: Started audio buffering at:', new Date(this.bufferStartTime).toISOString());
+      console.log('📦 Started audio buffering at:', new Date(this.bufferStartTime).toISOString());
     }
     
     // Check buffer size limit
     if (this.audioBuffer.length >= this.maxBufferSize) {
-      console.log('⚠️ ENHANCED LOGGING: Audio buffer full, removing oldest chunk');
       this.audioBuffer.shift();
     }
     
     // Check buffer timeout
     const bufferAge = Date.now() - (this.bufferStartTime || Date.now());
     if (bufferAge > this.bufferTimeoutMs) {
-      console.log('⚠️ ENHANCED LOGGING: Audio buffer timeout reached, clearing old data');
+      console.log('⚠️ Audio buffer timeout reached, clearing old data');
       this.clearAudioBuffer();
       this.bufferStartTime = Date.now();
     }
@@ -340,10 +311,6 @@ class AblyDeepgramBridge {
       timestamp: Date.now()
     });
     
-    if (this.receivedChunkCount % 20 === 0) {
-      console.log('📦 ENHANCED LOGGING: Audio data buffered, new buffer size:', this.audioBuffer.length);
-    }
-    
     // If transcription is active but Deepgram is not connected, try to reconnect
     if (this.transcriptionActive && (!this.deepgramConnection || this.deepgramConnection.readyState !== WebSocket.OPEN)) {
       this.scheduleDeepgramReconnect();
@@ -351,28 +318,28 @@ class AblyDeepgramBridge {
   }
 
   clearAudioBuffer() {
-    console.log('🧹 ENHANCED LOGGING: Clearing audio buffer');
-    console.log('🧹 ENHANCED LOGGING: Discarding', this.audioBuffer.length, 'buffered audio chunks');
+    console.log('🧹 Clearing audio buffer');
+    console.log('🧹 Discarding', this.audioBuffer.length, 'buffered audio chunks');
     this.audioBuffer = [];
     this.bufferStartTime = null;
   }
 
   sendBufferedAudio() {
     if (this.audioBuffer.length === 0) {
-      console.log('📦 ENHANCED LOGGING: No buffered audio to send');
+      console.log('📦 No buffered audio to send');
       return;
     }
     
-    console.log('📦 ENHANCED LOGGING: Sending', this.audioBuffer.length, 'buffered audio chunks to Deepgram');
+    console.log('📦 Sending', this.audioBuffer.length, 'buffered audio chunks to Deepgram');
     
     let sentCount = 0;
     const bufferAge = Date.now() - (this.bufferStartTime || Date.now());
     
-    console.log('📦 ENHANCED LOGGING: Buffer age:', bufferAge, 'ms');
+    console.log('📦 Buffer age:', bufferAge, 'ms');
     
     // Check if buffered data is still fresh enough
     if (bufferAge > this.bufferTimeoutMs) {
-      console.log('⚠️ ENHANCED LOGGING: Buffered audio too old, discarding');
+      console.log('⚠️ Buffered audio too old, discarding');
       this.clearAudioBuffer();
       return;
     }
@@ -384,16 +351,16 @@ class AblyDeepgramBridge {
           this.deepgramConnection.send(bufferedChunk.data);
           sentCount++;
         } catch (error) {
-          console.error('❌ ENHANCED LOGGING: Error sending buffered audio chunk:', error);
+          console.error('❌ Error sending buffered audio chunk:', error);
           break;
         }
       } else {
-        console.log('⚠️ ENHANCED LOGGING: Deepgram connection lost while sending buffered audio');
+        console.log('⚠️ Deepgram connection lost while sending buffered audio');
         break;
       }
     }
     
-    console.log('📦 ENHANCED LOGGING: Successfully sent', sentCount, 'buffered audio chunks');
+    console.log('📦 Successfully sent', sentCount, 'buffered audio chunks');
     this.clearAudioBuffer();
   }
 
@@ -403,7 +370,7 @@ class AblyDeepgramBridge {
     }
     
     if (this.deepgramReconnectAttempts >= this.maxDeepgramReconnects) {
-      console.log('⚠️ ENHANCED LOGGING: Maximum Deepgram reconnection attempts reached');
+      console.log('⚠️ Maximum Deepgram reconnection attempts reached');
       this.deepgramReconnectAttempts = 0;
       return;
     }
@@ -411,16 +378,16 @@ class AblyDeepgramBridge {
     this.deepgramReconnectAttempts++;
     const delay = this.deepgramReconnectDelay * Math.pow(1.5, this.deepgramReconnectAttempts - 1);
     
-    console.log(`🔄 ENHANCED LOGGING: Scheduling Deepgram reconnection in ${delay}ms (attempt ${this.deepgramReconnectAttempts}/${this.maxDeepgramReconnects})`);
+    console.log(`🔄 Scheduling Deepgram reconnection in ${delay}ms (attempt ${this.deepgramReconnectAttempts}/${this.maxDeepgramReconnects})`);
     
     this.deepgramReconnectTimer = setTimeout(() => {
-      console.log(`🔄 ENHANCED LOGGING: Executing Deepgram reconnection attempt ${this.deepgramReconnectAttempts}`);
+      console.log(`🔄 Executing Deepgram reconnection attempt ${this.deepgramReconnectAttempts}`);
       this.deepgramReconnectTimer = null;
       
       if (this.transcriptionActive && this.deepgramApiKey) {
         this.startDeepgramConnection();
       } else {
-        console.log('⚠️ ENHANCED LOGGING: Skipping reconnection - transcription inactive or no API key');
+        console.log('⚠️ Skipping reconnection - transcription inactive or no API key');
       }
     }, delay);
   }
@@ -428,7 +395,7 @@ class AblyDeepgramBridge {
   startDeepgramHeartbeat() {
     this.stopDeepgramHeartbeat();
     
-    console.log('💓 ENHANCED LOGGING: Starting Deepgram heartbeat');
+    console.log('💓 Starting Deepgram heartbeat');
     
     this.deepgramHeartbeatInterval = setInterval(() => {
       if (this.deepgramConnection && this.deepgramConnection.readyState === WebSocket.OPEN) {
@@ -437,14 +404,14 @@ class AblyDeepgramBridge {
             type: "KeepAlive", 
             timestamp: Date.now() 
           }));
-          console.log('💓 ENHANCED LOGGING: Sent Deepgram heartbeat');
+          console.log('💓 Sent Deepgram heartbeat');
         } catch (error) {
-          console.error('❌ ENHANCED LOGGING: Error sending Deepgram heartbeat:', error);
+          console.error('❌ Error sending Deepgram heartbeat:', error);
           this.deepgramReady = false;
           this.scheduleDeepgramReconnect();
         }
       } else {
-        console.log('⚠️ ENHANCED LOGGING: Skipping heartbeat - Deepgram connection not ready');
+        console.log('⚠️ Skipping heartbeat - Deepgram connection not ready');
       }
     }, this.deepgramHeartbeatIntervalMs);
   }
@@ -453,19 +420,19 @@ class AblyDeepgramBridge {
     if (this.deepgramHeartbeatInterval) {
       clearInterval(this.deepgramHeartbeatInterval);
       this.deepgramHeartbeatInterval = null;
-      console.log('💓 ENHANCED LOGGING: Stopped Deepgram heartbeat');
+      console.log('💓 Stopped Deepgram heartbeat');
     }
   }
 
   // Updated startDeepgramConnection to accept and use mimeType, sampleRate, and channelCount
   startDeepgramConnection(mimeType = null, sampleRate = null, channelCount = null) {
     if (!this.deepgramApiKey) {
-      console.error('❌ ENHANCED LOGGING: No Deepgram API key provided');
+      console.error('❌ No Deepgram API key provided');
       return;
     }
 
     if (!this.transcriptionActive) {
-      console.log('⚠️ ENHANCED LOGGING: Transcription not active, not starting Deepgram connection');
+      console.log('⚠️ Transcription not active, not starting Deepgram connection');
       return;
     }
     
@@ -479,10 +446,10 @@ class AblyDeepgramBridge {
       this.deepgramConnection = null;
     }
 
-    console.log('🔗 ENHANCED LOGGING: Connecting to Deepgram...');
-    console.log('🎤 ENHANCED LOGGING: Using MIME type:', mimeType);
-    console.log('🎤 ENHANCED LOGGING: Using sample rate:', sampleRate || this.audioCharacteristics.sampleRate);
-    console.log('🎤 ENHANCED LOGGING: Using channel count:', channelCount || this.audioCharacteristics.channelCount);
+    console.log('🔗 Connecting to Deepgram...');
+    console.log('🎤 Using MIME type:', mimeType);
+    console.log('🎤 Using sample rate:', sampleRate || this.audioCharacteristics.sampleRate);
+    console.log('🎤 Using channel count:', channelCount || this.audioCharacteristics.channelCount);
 
     // CRITICAL FIX: Add diarize=true parameter for speaker separation
     const dgUrl = new URL('wss://api.deepgram.com/v1/listen');
@@ -495,28 +462,28 @@ class AblyDeepgramBridge {
     dgUrl.searchParams.set('smart_format', 'true');
     dgUrl.searchParams.set('diarize', 'true'); // CRITICAL: Enable speaker diarization
     
-    console.log('🎯 ENHANCED LOGGING: CRITICAL FIX - Speaker diarization enabled with diarize=true');
-    console.log('🔗 ENHANCED LOGGING: Deepgram connection URL:', dgUrl.toString());
+    console.log('🎯 CRITICAL FIX - Speaker diarization enabled with diarize=true');
+    console.log('🔗 Deepgram connection URL:', dgUrl.toString());
     
     const ws = new WebSocket(dgUrl.toString(), ['token', this.deepgramApiKey]);
     
     // Add detailed logging around WebSocket creation and state
-    console.log('🔗 ENHANCED LOGGING: WebSocket created, initial readyState:', ws.readyState);
-    console.log('🔗 ENHANCED LOGGING: WebSocket.CONNECTING =', WebSocket.CONNECTING);
-    console.log('🔗 ENHANCED LOGGING: WebSocket.OPEN =', WebSocket.OPEN);
-    console.log('🔗 ENHANCED LOGGING: WebSocket.CLOSING =', WebSocket.CLOSING);
-    console.log('🔗 ENHANCED LOGGING: WebSocket.CLOSED =', WebSocket.CLOSED);
+    console.log('🔗 WebSocket created, initial readyState:', ws.readyState);
+    console.log('🔗 WebSocket.CONNECTING =', WebSocket.CONNECTING);
+    console.log('🔗 WebSocket.OPEN =', WebSocket.OPEN);
+    console.log('🔗 WebSocket.CLOSING =', WebSocket.CLOSING);
+    console.log('🔗 WebSocket.CLOSED =', WebSocket.CLOSED);
 
     ws.on('open', () => {
-      console.log('✅ ENHANCED LOGGING: WebSocket open event fired');
-      console.log('✅ ENHANCED LOGGING: WebSocket readyState on open:', ws.readyState);
+      console.log('✅ WebSocket open event fired');
+      console.log('✅ WebSocket readyState on open:', ws.readyState);
       
       if (!ws || ws.readyState !== WebSocket.OPEN) {
-        console.log('⚠️ ENHANCED LOGGING: WebSocket connection invalid during open callback');
+        console.log('⚠️ WebSocket connection invalid during open callback');
         return;
       }
 
-      console.log('✅ ENHANCED LOGGING: Connected to Deepgram successfully with speaker diarization enabled');
+      console.log('✅ Connected to Deepgram successfully with speaker diarization enabled');
       
       this.deepgramConnection = ws;
       this.deepgramReady = true;
@@ -539,12 +506,12 @@ class AblyDeepgramBridge {
           timestamp: Date.now(),
           diarizationEnabled: true // Indicate that speaker diarization is active
         });
-        console.log('✅ ENHANCED LOGGING: Notified web app via Ably that Deepgram is connected with diarization');
+        console.log('✅ Notified web app via Ably that Deepgram is connected with diarization');
       }
       
       // Call the callback if provided
       if (this.onDeepgramConnected && typeof this.onDeepgramConnected === 'function') {
-        console.log('🔔 ENHANCED LOGGING: Calling Deepgram connected callback');
+        console.log('🔔 Calling Deepgram connected callback');
         this.onDeepgramConnected();
       }
     });
@@ -562,13 +529,13 @@ class AblyDeepgramBridge {
         }
         this.messageStats.byType[message.type]++;
         
-        // ENHANCED: Log ALL messages from Deepgram, not just Results
-        console.log('📨 ENHANCED LOGGING: Received message from Deepgram, type:', message.type);
-        console.log('📨 ENHANCED LOGGING: Full message content:', JSON.stringify(message, null, 2));
+        // Log ALL messages from Deepgram, not just Results
+        console.log('📨 Received message from Deepgram, type:', message.type);
+        console.log('📨 Full message content:', JSON.stringify(message, null, 2));
         
         // Log message statistics periodically
         if (this.messageStats.totalReceived % 10 === 0) {
-          console.log('📊 ENHANCED LOGGING: Deepgram message statistics:');
+          console.log('📊 Deepgram message statistics:');
           console.log('  - Total messages received:', this.messageStats.totalReceived);
           console.log('  - Message types:', this.messageStats.byType);
           console.log('  - Time since first message:', Date.now() - this.messageStats.lastMessageTime, 'ms');
@@ -582,8 +549,8 @@ class AblyDeepgramBridge {
           // Only log when there's actual transcript content
           if (message.channel?.alternatives?.[0]?.transcript) {
             const alternative = message.channel.alternatives[0];
-            console.log('📝 ENHANCED LOGGING: Transcript:', alternative.transcript);
-            console.log('📝 ENHANCED LOGGING: Is final:', message.is_final);
+            console.log('📝 Transcript:', alternative.transcript);
+            console.log('📝 Is final:', message.is_final);
             
             // CRITICAL: Log speaker diarization information
             const words = alternative.words;
@@ -604,23 +571,23 @@ class AblyDeepgramBridge {
                     dominantSpeaker = speaker;
                   }
                 }
-                console.log('🎯 ENHANCED LOGGING: SPEAKER DIARIZATION RESULTS:');
-                console.log('🎯 ENHANCED LOGGING: Detected speakers:', Array.from(speakerCounts.keys()));
-                console.log('🎯 ENHANCED LOGGING: Speaker word counts:', Object.fromEntries(speakerCounts));
-                console.log('🎯 ENHANCED LOGGING: Dominant speaker for this segment:', dominantSpeaker);
+                console.log('🎯 SPEAKER DIARIZATION RESULTS:');
+                console.log('🎯 Detected speakers:', Array.from(speakerCounts.keys()));
+                console.log('🎯 Speaker word counts:', Object.fromEntries(speakerCounts));
+                console.log('🎯 Dominant speaker for this segment:', dominantSpeaker);
               } else {
-                console.log('⚠️ ENHANCED LOGGING: No speaker information found in words array');
+                console.log('⚠️ No speaker information found in words array');
               }
             } else {
-              console.log('⚠️ ENHANCED LOGGING: No words array found in Deepgram response');
+              console.log('⚠️ No words array found in Deepgram response');
             }
           }
         } else if (message.type === 'Metadata') {
-          console.log('📋 ENHANCED LOGGING: Received Metadata from Deepgram:', message);
+          console.log('📋 Received Metadata from Deepgram:', message);
         } else if (message.type === 'UtteranceEnd') {
-          console.log('🔚 ENHANCED LOGGING: Received UtteranceEnd from Deepgram:', message);
+          console.log('🔚 Received UtteranceEnd from Deepgram:', message);
         } else if (message.type === 'Error') {
-          console.error('❌ ENHANCED LOGGING: Received Error from Deepgram:', message);
+          console.error('❌ Received Error from Deepgram:', message);
           
           // Forward error to web app
           if (this.resultsChannel) {
@@ -641,12 +608,12 @@ class AblyDeepgramBridge {
           
           // Only log occasionally to reduce noise
           if (this.receivedChunkCount % 20 === 0) {
-            console.log('📨 ENHANCED LOGGING: Forwarded Deepgram message to web app via Ably');
+            console.log('📨 Forwarded Deepgram message to web app via Ably');
           }
         }
       } catch (error) {
-        console.error('❌ ENHANCED LOGGING: Error parsing Deepgram message:', error);
-        console.error('❌ ENHANCED LOGGING: Raw message data:', data.toString().substring(0, 200) + '...');
+        console.error('❌ Error parsing Deepgram message:', error);
+        console.error('❌ Raw message data:', data.toString().substring(0, 200) + '...');
         
         // Forward error to web app
         if (this.resultsChannel) {
@@ -661,11 +628,11 @@ class AblyDeepgramBridge {
     });
 
     ws.on('error', (error) => {
-      console.error('❌ ENHANCED LOGGING: Deepgram WebSocket error event fired');
-      console.error('❌ ENHANCED LOGGING: Error details:', error);
-      console.error('❌ ENHANCED LOGGING: WebSocket readyState on error:', ws.readyState);
+      console.error('❌ Deepgram WebSocket error event fired');
+      console.error('❌ Error details:', error);
+      console.error('❌ WebSocket readyState on error:', ws.readyState);
       
-      // ENHANCED: More detailed error reporting
+      // Enhanced error reporting
       const errorDetails = {
         message: error.message,
         code: error.code,
@@ -677,7 +644,7 @@ class AblyDeepgramBridge {
         } : 'unknown'
       };
       
-      console.error('❌ ENHANCED LOGGING: Detailed error information:', errorDetails);
+      console.error('❌ Detailed error information:', errorDetails);
       
       this.deepgramReady = false;
       this.stopDeepgramHeartbeat();
@@ -697,17 +664,17 @@ class AblyDeepgramBridge {
           details: errorDetails,
           timestamp: Date.now()
         });
-        console.log('❌ ENHANCED LOGGING: Published detailed error to Ably');
+        console.log('❌ Published detailed error to Ably');
       }
     });
 
     ws.on('close', (code, reason) => {
-      console.log('🔗 ENHANCED LOGGING: Deepgram WebSocket close event fired');
-      console.log('🔗 ENHANCED LOGGING: Close code:', code);
-      console.log('🔗 ENHANCED LOGGING: Close reason:', reason?.toString());
-      console.log('🔗 ENHANCED LOGGING: WebSocket readyState on close:', ws.readyState);
+      console.log('🔗 Deepgram WebSocket close event fired');
+      console.log('🔗 Close code:', code);
+      console.log('🔗 Close reason:', reason?.toString());
+      console.log('🔗 WebSocket readyState on close:', ws.readyState);
       
-      // ENHANCED: Provide more context about close codes
+      // Provide more context about close codes
       let closeDescription = 'Unknown close reason';
       switch (code) {
         case 1000:
@@ -757,7 +724,7 @@ class AblyDeepgramBridge {
           break;
       }
       
-      console.log('🔗 ENHANCED LOGGING: Close description:', closeDescription);
+      console.log('🔗 Close description:', closeDescription);
       
       this.deepgramReady = false;
       this.stopDeepgramHeartbeat();
@@ -784,7 +751,7 @@ class AblyDeepgramBridge {
     // Add timeout to detect if no events fire
     setTimeout(() => {
       if (ws.readyState === WebSocket.CONNECTING) {
-        console.log('⚠️ ENHANCED LOGGING: WebSocket still connecting after 5 seconds, readyState:', ws.readyState);
+        console.log('⚠️ WebSocket still connecting after 5 seconds, readyState:', ws.readyState);
         
         // Notify web app of connection issue
         if (this.resultsChannel) {
@@ -795,7 +762,7 @@ class AblyDeepgramBridge {
           });
         }
       } else if (ws.readyState === WebSocket.CLOSED) {
-        console.log('⚠️ ENHANCED LOGGING: WebSocket closed within 5 seconds without firing events, readyState:', ws.readyState);
+        console.log('⚠️ WebSocket closed within 5 seconds without firing events, readyState:', ws.readyState);
         
         // Notify web app of connection issue
         if (this.resultsChannel) {
@@ -819,19 +786,19 @@ class AblyDeepgramBridge {
     this.stopDeepgramHeartbeat();
     
     if (this.deepgramConnection) {
-      console.log('🛑 ENHANCED LOGGING: Closing Deepgram connection');
+      console.log('🛑 Closing Deepgram connection');
       
       this.deepgramReady = false;
       this.clearAudioBuffer();
       
       this.deepgramConnection.close();
       this.deepgramConnection = null;
-      console.log('🛑 ENHANCED LOGGING: Deepgram connection closed and nullified');
+      console.log('🛑 Deepgram connection closed and nullified');
     }
   }
 
   cleanup() {
-    console.log('🧹 ENHANCED LOGGING: Cleaning up Ably Deepgram Bridge');
+    console.log('🧹 Cleaning up Ably Deepgram Bridge');
     
     this.transcriptionActive = false;
     this.stopDeepgramConnection();

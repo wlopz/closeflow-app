@@ -91,13 +91,11 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
   
   // Handle desktop call state changes
   useEffect(() => {
-    console.log('🎯 ENHANCED LOGGING: CallAnalyzer desktop state change');
-    console.log('🎯 ENHANCED LOGGING: desktopCallActive:', desktopCallActive);
-    console.log('🎯 ENHANCED LOGGING: isLive:', isLive);
+    console.log('🎯 CallAnalyzer desktop state change - desktopCallActive:', desktopCallActive, 'isLive:', isLive);
     
     // Only stop if desktop call becomes inactive and we're currently live
     if (!desktopCallActive && isLive) {
-      console.log('🛑 ENHANCED LOGGING: Desktop call stopped, stopping live analysis');
+      console.log('🛑 Desktop call stopped, stopping live analysis');
       stopLive();
     }
   }, [desktopCallActive, isLive]);
@@ -107,15 +105,15 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
     const handleDesktopCallActivation = async () => {
       // Only start if desktop call is active, we're not already live, and we have a user
       if (desktopCallActive && !isLive && user && desktopCallStarted && deepgramApiKey && mimeType) {
-        console.log('🚀 ENHANCED LOGGING: Desktop call is active, starting live analysis automatically');
-        console.log('🚀 ENHANCED LOGGING: Using Deepgram API key:', deepgramApiKey ? `${deepgramApiKey.substring(0, 8)}...` : 'none');
-        console.log('🚀 ENHANCED LOGGING: Using MIME type:', mimeType);
+        console.log('🚀 Desktop call is active, starting live analysis automatically');
+        console.log('🚀 Using Deepgram API key:', deepgramApiKey ? `${deepgramApiKey.substring(0, 8)}...` : 'none');
+        console.log('🚀 Using MIME type:', mimeType);
         
         try {
           await startLive();
-          console.log('✅ ENHANCED LOGGING: Successfully started live analysis in response to desktop call');
+          console.log('✅ Successfully started live analysis in response to desktop call');
         } catch (error) {
-          console.error('❌ ENHANCED LOGGING: Failed to auto-start live analysis:', error);
+          console.error('❌ Failed to auto-start live analysis:', error);
           toast({
             title: "Failed to start call analysis",
             description: "Could not automatically start call analysis. Please try manually.",
@@ -216,8 +214,6 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         const response = await fetch('/api/desktop-sync?action=get-messages-for-webapp');
         const data = await response.json();
         
-        console.log('📨 ENHANCED LOGGING: Polled for desktop messages, received:', data.messages?.length || 0);
-        
         if (data.messages && data.messages.length > 0) {
           for (const message of data.messages) {
             await processDesktopMessage(message);
@@ -235,15 +231,15 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
                     messageId: message.id
                   })
                 });
-                console.log('✅ ENHANCED LOGGING: Acknowledged message:', message.id);
+                console.log('✅ Acknowledged message:', message.id);
               } catch (ackError) {
-                console.error('❌ ENHANCED LOGGING: Error acknowledging message:', ackError);
+                console.error('❌ Error acknowledging message:', ackError);
               }
             }
           }
         }
       } catch (error) {
-        console.error('❌ ENHANCED LOGGING: Error polling for desktop messages:', error);
+        console.error('❌ Error polling for desktop messages:', error);
       } finally {
         setIsPollingMessages(false);
       }
@@ -273,10 +269,10 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
   
   // Process messages from desktop app
   const processDesktopMessage = async (message: any) => {
-    console.log('📨 ENHANCED LOGGING: Processing desktop message:', message);
+    console.log('📨 Processing desktop message:', message);
     
     if (!message || !message.content) {
-      console.log('⚠️ ENHANCED LOGGING: Invalid message format:', message);
+      console.log('⚠️ Invalid message format:', message);
       return;
     }
     
@@ -284,17 +280,17 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
     
     switch (content.type) {
       case 'desktop-call-started':
-        console.log('🚀 ENHANCED LOGGING: Desktop call started message received');
-        console.log('🚀 ENHANCED LOGGING: Device settings:', content.deviceSettings);
+        console.log('🚀 Desktop call started message received');
+        console.log('🚀 Device settings:', content.deviceSettings);
         
         // Store the API key and audio parameters for later use
         if (content.deepgramApiKey) {
           setDeepgramApiKey(content.deepgramApiKey);
-          console.log('🔑 ENHANCED LOGGING: Stored Deepgram API key:', content.deepgramApiKey ? `${content.deepgramApiKey.substring(0, 8)}...` : 'none');
+          console.log('🔑 Stored Deepgram API key:', content.deepgramApiKey ? `${content.deepgramApiKey.substring(0, 8)}...` : 'none');
         }
         if (content.deviceSettings?.mimeType) {
           setMimeType(content.deviceSettings.mimeType);
-          console.log('🎤 ENHANCED LOGGING: Stored MIME type:', content.deviceSettings.mimeType);
+          console.log('🎤 Stored MIME type:', content.deviceSettings.mimeType);
         }
         
         // Mark that we've received the desktop call started message
@@ -303,7 +299,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         break;
         
       case 'desktop-call-stopped':
-        console.log('🛑 ENHANCED LOGGING: Desktop call stopped message received');
+        console.log('🛑 Desktop call stopped message received');
         
         // If we're live, stop the call
         if (isLive) {
@@ -312,7 +308,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         break;
         
       default:
-        console.log('❓ ENHANCED LOGGING: Unknown message type from desktop:', content.type);
+        console.log('❓ Unknown message type from desktop:', content.type);
     }
   };
   
@@ -324,9 +320,9 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       setIsInitializing(true);
       setIsLoading(true);
       
-      console.log('🚀 ENHANCED LOGGING: Starting live call analysis');
-      console.log('🚀 ENHANCED LOGGING: Deepgram API key available:', !!deepgramApiKey);
-      console.log('🚀 ENHANCED LOGGING: MIME type available:', !!mimeType);
+      console.log('🚀 Starting live call analysis');
+      console.log('🚀 Deepgram API key available:', !!deepgramApiKey);
+      console.log('🚀 MIME type available:', !!mimeType);
       
       if (!user) {
         toast({
@@ -349,14 +345,14 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       }
       
       setCallId(newCall.id);
-      console.log('✅ ENHANCED LOGGING: Created call record:', newCall.id);
+      console.log('✅ Created call record:', newCall.id);
       
       // If this is a desktop-initiated call, set up Ably communication
       if (desktopCallActive && isAblyAvailable()) {
         const channels = getAblyChannels();
         
         if (channels && deepgramApiKey && mimeType) {
-          console.log('🔗 ENHANCED LOGGING: Setting up Ably communication for desktop call');
+          console.log('🔗 Setting up Ably communication for desktop call');
           
           // Send start-transcription message to desktop
           await channels.controlChannel.publish('start-transcription', {
@@ -366,19 +362,17 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
             timestamp: Date.now()
           });
           
-          console.log('✅ ENHANCED LOGGING: Sent start-transcription message to desktop');
+          console.log('✅ Sent start-transcription message to desktop');
           
           // Subscribe to Deepgram results from desktop
           const resultsSubscription = channels.resultsChannel.subscribe((message) => {
-            console.log('📨 ENHANCED LOGGING: Received Deepgram result via Ably:', message.name);
-            // ENHANCED LOGGING: Log the entire message object for debugging
-            console.log('📨 ENHANCED LOGGING: Full Deepgram message:', message);
+            console.log('📨 Received Deepgram result via Ably:', message.name);
             handleDeepgramResult(message, newCall.id);
           });
           
           // Subscribe to Deepgram errors from desktop
           const errorSubscription = channels.resultsChannel.subscribe('deepgram-error', (message) => {
-            console.error('❌ ENHANCED LOGGING: Received Deepgram error via Ably:', message.data);
+            console.error('❌ Received Deepgram error via Ably:', message.data);
             
             // Add error to state
             setDeepgramErrors(prev => [...prev, `${message.data.error}: ${message.data.details || 'No details provided'}`]);
@@ -392,9 +386,9 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
           });
           
           ablySubscriptionsRef.current.push(resultsSubscription, errorSubscription);
-          console.log('✅ ENHANCED LOGGING: Subscribed to Deepgram results channel');
+          console.log('✅ Subscribed to Deepgram results channel');
         } else {
-          console.error('❌ ENHANCED LOGGING: Missing required data for Ably communication');
+          console.error('❌ Missing required data for Ably communication');
           console.log('Channels available:', !!channels);
           console.log('Deepgram API key available:', !!deepgramApiKey);
           console.log('MIME type available:', !!mimeType);
@@ -407,7 +401,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         }
       } else {
         // Set up regular Supabase real-time subscriptions for manual calls
-        console.log('📡 ENHANCED LOGGING: Setting up Supabase real-time subscriptions');
+        console.log('📡 Setting up Supabase real-time subscriptions');
         
         const transcriptSubscription = supabase
           .channel(`call-transcripts-${newCall.id}`)
@@ -417,15 +411,13 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
             table: 'call_transcripts',
             filter: `call_id=eq.${newCall.id}`
           }, (payload) => {
-            console.log('📝 ENHANCED LOGGING: New transcript received:', payload.new);
+            console.log('📝 New transcript received:', payload.new);
             
             const newTranscript = payload.new as Transcript;
             
-            // MODIFIED: Show all transcripts for debugging, not just final ones
-            // if (newTranscript.is_final) {
-              setTranscripts(prev => [...prev, newTranscript]);
-              setLastTranscriptTime(Date.now());
-            // }
+            // Show all transcripts for debugging, not just final ones
+            setTranscripts(prev => [...prev, newTranscript]);
+            setLastTranscriptTime(Date.now());
           })
           .subscribe();
         
@@ -437,7 +429,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
             table: 'ai_insights',
             filter: `call_id=eq.${newCall.id}`
           }, (payload) => {
-            console.log('🧠 ENHANCED LOGGING: New insight received:', payload.new);
+            console.log('🧠 New insight received:', payload.new);
             
             const newInsight = payload.new as Insight;
             setInsights(prev => [...prev, newInsight]);
@@ -460,7 +452,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       setIsLoading(false);
       setIsInitializing(false);
       
-      console.log('✅ ENHANCED LOGGING: Live call analysis started successfully');
+      console.log('✅ Live call analysis started successfully');
       
       // Notify web app that call has started
       try {
@@ -474,13 +466,13 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
             timestamp: Date.now()
           })
         });
-        console.log('✅ ENHANCED LOGGING: Sent web-app-call-started-confirmation to API');
+        console.log('✅ Sent web-app-call-started-confirmation to API');
       } catch (error) {
-        console.error('❌ ENHANCED LOGGING: Error sending call started confirmation:', error);
+        console.error('❌ Error sending call started confirmation:', error);
       }
       
     } catch (error) {
-      console.error('❌ ENHANCED LOGGING: Error starting live call analysis:', error);
+      console.error('❌ Error starting live call analysis:', error);
       
       toast({
         title: "Failed to start call",
@@ -496,8 +488,8 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
   
   // Stop live call analysis
   const stopLive = async () => {
-    console.log('🛑 ENHANCED LOGGING: stopLive function called');
-    console.log('🛑 ENHANCED LOGGING: Current state:', { isLive, callId, isEndingCall });
+    console.log('🛑 stopLive function called');
+    console.log('🛑 Current state:', { isLive, callId, isEndingCall });
     
     if (!isLive || !callId || isEndingCall) return;
     
@@ -514,7 +506,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
             timestamp: Date.now()
           });
           
-          console.log('✅ ENHANCED LOGGING: Sent stop-transcription message to desktop');
+          console.log('✅ Sent stop-transcription message to desktop');
         }
       }
       
@@ -551,13 +543,13 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
             timestamp: Date.now()
           })
         });
-        console.log('✅ ENHANCED LOGGING: Sent web-app-call-stopped-confirmation to API');
+        console.log('✅ Sent web-app-call-stopped-confirmation to API');
       } catch (error) {
-        console.error('❌ ENHANCED LOGGING: Error sending call stopped confirmation:', error);
+        console.error('❌ Error sending call stopped confirmation:', error);
       }
       
     } catch (error) {
-      console.error('❌ ENHANCED LOGGING: Error stopping live call analysis:', error);
+      console.error('❌ Error stopping live call analysis:', error);
       
       toast({
         title: "Failed to end call",
@@ -571,29 +563,28 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       // Notify parent component
       onCallEnd();
       
-      console.log('🛑 ENHANCED LOGGING: stopLive completed');
+      console.log('🛑 stopLive completed');
     }
   };
   
   // FIXED: Handle Deepgram results from Ably with robust transcript management
-  const handleDeepgramResult = async (message: any, callId: string) => {
+  const handleDeepgramResult = async (message: any, currentCallId: string) => {
     try {
-      // ENHANCED LOGGING: Log the entire message object for debugging
-      console.log('🔍 ENHANCED LOGGING: Processing Deepgram result message:', message);
+      console.log('🔍 Processing Deepgram result message:', message);
       
       // Check if this is a connection status message
       if (message.name === 'deepgram-connected') {
-        console.log('🔗 ENHANCED LOGGING: Received Deepgram connected status');
+        console.log('🔗 Received Deepgram connected status');
         return;
       }
       
       if (message.name === 'deepgram-disconnected') {
-        console.log('🔗 ENHANCED LOGGING: Received Deepgram disconnected status');
+        console.log('🔗 Received Deepgram disconnected status');
         return;
       }
       
       if (message.name === 'deepgram-error') {
-        console.error('❌ ENHANCED LOGGING: Received Deepgram error:', message.data);
+        console.error('❌ Received Deepgram error:', message.data);
         
         // Add to errors state
         setDeepgramErrors(prev => [...prev, `${message.data.error}: ${message.data.details || 'No details provided'}`]);
@@ -608,8 +599,8 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         const isFinal = message.data.data.is_final;
         
         if (transcript) {
-          console.log('📝 ENHANCED LOGGING: Processing transcript from Deepgram:', transcript);
-          console.log('📝 ENHANCED LOGGING: Is final:', isFinal);
+          console.log('📝 Processing transcript from Deepgram:', transcript);
+          console.log('📝 Is final:', isFinal);
           
           // FIXED: Extract speaker ID from Deepgram's speaker diarization
           let speakerId = 0; // Default to salesperson
@@ -642,10 +633,10 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
               speakerId = dominantSpeaker;
               speakerName = dominantSpeaker === 0 ? 'You' : 'Customer';
               
-              console.log('🎯 ENHANCED LOGGING: Speaker diarization results:');
-              console.log('🎯 ENHANCED LOGGING: Speaker counts:', Object.fromEntries(speakerCounts));
-              console.log('🎯 ENHANCED LOGGING: Dominant speaker:', dominantSpeaker);
-              console.log('🎯 ENHANCED LOGGING: Assigned speaker name:', speakerName);
+              console.log('🎯 Speaker diarization results:');
+              console.log('🎯 Speaker counts:', Object.fromEntries(speakerCounts));
+              console.log('🎯 Dominant speaker:', dominantSpeaker);
+              console.log('🎯 Assigned speaker name:', speakerName);
             }
           }
           
@@ -661,7 +652,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
               
               // If the last transcript is from the same speaker and is not final, update it
               if (lastTranscript.speaker_id === speakerId && !lastTranscript.is_final) {
-                console.log('🔄 ENHANCED LOGGING: Updating existing interim transcript');
+                console.log('🔄 Updating existing interim transcript');
                 lastTranscript.content = transcript;
                 lastTranscript.confidence = alternative.confidence || 0.9;
                 return newTranscripts;
@@ -671,7 +662,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
             // Create new transcript entry
             const newTranscript: Transcript = {
               id: isFinal ? '' : tempId, // Will be updated with DB ID if final
-              call_id: callId,
+              call_id: currentCallId,
               speaker_id: speakerId,
               speaker_name: speakerName,
               content: transcript,
@@ -681,7 +672,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
               temp_id: isFinal ? undefined : tempId
             };
             
-            console.log('➕ ENHANCED LOGGING: Adding new transcript:', {
+            console.log('➕ Adding new transcript:', {
               speaker: speakerName,
               isFinal,
               content: transcript.substring(0, 50) + '...'
@@ -698,7 +689,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
             try {
               // Create transcript record in database
               const persistedTranscript = await CallsService.addTranscript({
-                call_id: callId,
+                call_id: currentCallId,
                 speaker_id: speakerId,
                 speaker_name: speakerName,
                 content: transcript,
@@ -717,24 +708,25 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
                   )
                 );
                 
-                console.log('✅ ENHANCED LOGGING: Transcript persisted with ID:', persistedTranscript.id);
+                console.log('✅ Transcript persisted with ID:', persistedTranscript.id);
                 
                 // CRITICAL FIX: Process for AI insights with enhanced logging
                 console.log('🧠 AI INSIGHTS: About to process transcript for AI analysis');
                 console.log('🧠 AI INSIGHTS: Transcript content:', transcript);
                 console.log('🧠 AI INSIGHTS: Transcript length:', transcript.length);
                 console.log('🧠 AI INSIGHTS: Speaker:', speakerName);
+                console.log('🧠 AI INSIGHTS: Call ID:', currentCallId);
                 
-                await processTranscript(persistedTranscript);
+                await processTranscript(persistedTranscript, currentCallId);
               }
             } catch (error) {
-              console.error('❌ ENHANCED LOGGING: Error persisting transcript:', error);
+              console.error('❌ Error persisting transcript:', error);
             }
           }
         }
       }
     } catch (error) {
-      console.error('❌ ENHANCED LOGGING: Error handling Deepgram result:', error);
+      console.error('❌ Error handling Deepgram result:', error);
       
       // Add to errors state
       setDeepgramErrors(prev => [...prev, `Error processing transcript: ${error instanceof Error ? error.message : String(error)}`]);
@@ -748,14 +740,14 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
     }
   };
   
-  // CRITICAL FIX: Process transcript for analysis with relaxed filtering
-  const processTranscript = async (transcript: Transcript) => {
+  // CRITICAL FIX: Process transcript for analysis with explicit callId parameter
+  const processTranscript = async (transcript: Transcript, currentCallId: string) => {
     console.log('🧠 AI INSIGHTS: processTranscript called');
-    console.log('🧠 AI INSIGHTS: Call ID:', callId);
+    console.log('🧠 AI INSIGHTS: Call ID:', currentCallId);
     console.log('🧠 AI INSIGHTS: Transcript content:', transcript.content);
     console.log('🧠 AI INSIGHTS: Content length:', transcript.content.length);
     
-    if (!callId || !transcript.content) {
+    if (!currentCallId || !transcript.content) {
       console.log('🧠 AI INSIGHTS: Skipping - missing callId or content');
       return;
     }
@@ -802,7 +794,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         
         // Store insight in database
         const newInsight = await CallsService.addInsight({
-          call_id: callId,
+          call_id: currentCallId,
           transcript_id: transcript.id,
           type,
           content: data.analysis,
