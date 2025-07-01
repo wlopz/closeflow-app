@@ -32,7 +32,7 @@ interface CallFeedbackModalProps {
   callDuration: number;
   transcripts: Array<{
     id: string;
-    speaker_name: string;
+    speaker_name: string | null;
     content: string;
     timestamp_offset: number;
   }>;
