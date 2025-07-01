@@ -53,7 +53,7 @@ interface Insight {
 
 interface TranscriptGroup {
   speaker_id: number;
-  speaker_name: string;
+  speaker_name: string | null;
   transcripts: Transcript[];
   timestamp_offset: number;
   is_final: boolean;
