@@ -40,7 +40,7 @@ interface Transcript {
   content: string;
   timestamp_offset: number;
   is_final: boolean;
-  confidence?: number;
+  confidence?: number | null;
   temp_id?: string; // For tracking interim transcripts before they're persisted
 }
 
