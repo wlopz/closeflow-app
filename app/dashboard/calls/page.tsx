@@ -31,7 +31,7 @@ export default function CallsPage() {
   const deepgramApiKey = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
   const isValidDeepgramKey = deepgramApiKey && 
     deepgramApiKey.length >= 32 && 
-    deepgramApiKey !== 'd2763bda26344d49f04f25b1deeb6f054653f94f';
+    deepgramApiKey !== 'e4ebb862736fd42b930265d00775eb9dbfdf869c';
 
   console.log('🔑 Deepgram API Key from CallsPage:', deepgramApiKey);
   console.log('🔑 Deepgram API Key Valid:', isValidDeepgramKey);
