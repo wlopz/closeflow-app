@@ -36,7 +36,7 @@ interface Transcript {
   id: string;
   call_id: string;
   speaker_id: number;
-  speaker_name: string;
+  speaker_name: string | null;
   content: string;
   timestamp_offset: number;
   is_final: boolean;
