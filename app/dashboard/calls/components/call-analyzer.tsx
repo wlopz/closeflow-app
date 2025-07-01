@@ -80,6 +80,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
   
   // Refs
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const insightsScrollRef = useRef<HTMLDivElement | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const messagePollingRef = useRef<NodeJS.Timeout | null>(null);
   const transcriptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -154,6 +155,13 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       scrollRef.current.scrollTop = 0;
     }
   }, [transcripts]);
+  
+  // Auto-scroll to top when new insights arrive
+  useEffect(() => {
+    if (insightsScrollRef.current && insights.length > 0) {
+      insightsScrollRef.current.scrollTop = 0;
+    }
+  }, [insights]);
   
   // Inactivity detection
   useEffect(() => {
@@ -803,7 +811,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         
         if (newInsight) {
           console.log('🧠 AI INSIGHTS: Insight stored in database:', newInsight.id);
-          setInsights(prev => [...prev, newInsight]);
+          setInsights(prev => [newInsight, ...prev]);
           
           // Show toast for important insights
           if (['objection', 'buying-signal', 'warning'].includes(type)) {
@@ -872,6 +880,26 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
       case 'good-move': return <CheckCircle className="h-4 w-4 text-emerald-500" />;
       case 'next-step': return <TrendingUp className="h-4 w-4 text-purple-500" />;
       default: return <Brain className="h-4 w-4 text-gray-500" />;
+    }
+  };
+  
+  // Get insight color class based on type
+  const getInsightColorClass = (type: Insight['type']): string => {
+    switch (type) {
+      case 'objection': 
+        return 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800';
+      case 'opportunity': 
+        return 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800';
+      case 'buying-signal': 
+        return 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800';
+      case 'warning': 
+        return 'bg-orange-50 border-orange-200 dark:bg-orange-900/20 dark:border-orange-800';
+      case 'good-move': 
+        return 'bg-emerald-50 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800';
+      case 'next-step': 
+        return 'bg-purple-50 border-purple-200 dark:bg-purple-900/20 dark:border-purple-800';
+      default: 
+        return 'bg-gray-50 border-gray-200 dark:bg-gray-900/20 dark:border-gray-800';
     }
   };
   
@@ -993,7 +1021,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
               </div>
             ) : (
               <div className="space-y-6">
-                {/* FIXED: Render grouped transcripts as chat bubbles with proper speaker separation */}
+                {/* ENHANCED: Render grouped transcripts as chat bubbles with colored backgrounds */}
                 {reversedGroups.map((group, groupIndex) => {
                   const isSalesperson = group.speaker_id === 0;
                   
@@ -1035,8 +1063,8 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
                           <div className={cn(
                             "p-3 rounded-lg",
                             isSalesperson 
-                              ? "bg-primary/10 text-foreground rounded-tr-none" 
-                              : "bg-muted text-foreground rounded-tl-none"
+                              ? "bg-blue-100 dark:bg-blue-900/20 text-foreground rounded-tr-none" 
+                              : "bg-green-100 dark:bg-green-900/20 text-foreground rounded-tl-none"
                           )}>
                             <div className="flex flex-col">
                               <p className="text-sm leading-relaxed">{combinedContent}</p>
@@ -1080,7 +1108,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
             </Badge>
           </div>
           
-          <ScrollArea className="h-[500px] p-4">
+          <ScrollArea className="h-[500px] p-4" ref={insightsScrollRef}>
             {insights.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center p-8">
                 <Brain className="h-12 w-12 text-muted-foreground mb-4 opacity-50" />
@@ -1111,8 +1139,15 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
               </div>
             ) : (
               <div className="space-y-4">
-                {insights.map((insight) => (
-                  <div key={insight.id} className="p-4 border rounded-lg">
+                {/* ENHANCED: Display insights with color-coded backgrounds based on type */}
+                {[...insights].reverse().map((insight) => (
+                  <div 
+                    key={insight.id} 
+                    className={cn(
+                      "p-4 border rounded-lg", 
+                      getInsightColorClass(insight.type)
+                    )}
+                  >
                     <div className="flex items-start gap-3">
                       {getInsightIcon(insight.type)}
                       <div className="flex-1">
