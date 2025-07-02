@@ -19,10 +19,14 @@ class CloseFlowDesktop {
     this.audioMonitorInterval = null;
     this.connectionCheckInterval = null;
     this.isConnected = false;
+
+    // ENHANCED: Dynamic web app URL configuration
+    this.webAppUrl = 'https://prismatic-bombolone-9c6c5e.netlify.app/'; // Your production Netlify URL
+    console.log('🌐 ENHANCED LOGGING: Web app URL configured as:', this.webAppUrl);
     
     // ENHANCED: Dynamic web app URL configuration
-    this.webAppUrl = this.getWebAppUrl();
-    console.log('🌐 ENHANCED LOGGING: Web app URL configured as:', this.webAppUrl);
+    // this.webAppUrl = this.getWebAppUrl();
+    // console.log('🌐 ENHANCED LOGGING: Web app URL configured as:', this.webAppUrl);
     
     this.isStartingCall = false;
     this.isStoppingCall = false;
@@ -38,8 +42,12 @@ class CloseFlowDesktop {
 
     // NEW: Ably integration
     this.ablyDeepgramBridge = null;
-    this.ablyApiKey = process.env.ABLY_API_KEY || null;
-    
+    this.ablyApiKey = 'vrVhOA.IbcrHQ:GNA8p_0hcl2gOGiNcwjh-k8R3AnmKQ0PYmTReJ0fNrQ';
+
+    // NEW: Ably integration
+    // this.ablyDeepgramBridge = null;
+    // this.ablyApiKey = process.env.ABLY_API_KEY || null;
+
     // NEW: Periodic ping to web app
     this.webAppPingInterval = null;
     this.webAppPingIntervalMs = 5000; // 5 seconds
