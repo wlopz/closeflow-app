@@ -152,14 +152,32 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
   // Auto-scroll to top when new transcripts arrive (since latest is at top)
   useEffect(() => {
     if (scrollRef.current && transcripts.length > 0) {
-      scrollRef.current.scrollTop = 0;
+      // Use requestAnimationFrame to ensure DOM has been updated
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = 0;
+        }
+      });
     }
   }, [transcripts]);
   
-  // Auto-scroll to top when new insights arrive
+  // ENHANCED: Auto-scroll to top when new insights arrive with improved reliability
   useEffect(() => {
     if (insightsScrollRef.current && insights.length > 0) {
-      insightsScrollRef.current.scrollTop = 0;
+      // Use requestAnimationFrame to ensure DOM has been updated
+      requestAnimationFrame(() => {
+        if (insightsScrollRef.current) {
+          // Scroll to the very top to show the newest insight
+          insightsScrollRef.current.scrollTop = 0;
+          
+          // Add a small delay to handle any potential layout shifts
+          setTimeout(() => {
+            if (insightsScrollRef.current) {
+              insightsScrollRef.current.scrollTop = 0;
+            }
+          }, 50);
+        }
+      });
     }
   }, [insights]);
   
@@ -440,7 +458,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
             console.log('🧠 New insight received:', payload.new);
             
             const newInsight = payload.new as Insight;
-            setInsights(prev => [...prev, newInsight]);
+            setInsights(prev => [newInsight, ...prev]); // Add new insights at the beginning
             
             // Show toast for important insights
             if (['objection', 'buying-signal', 'warning'].includes(newInsight.type)) {
@@ -811,7 +829,7 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
         
         if (newInsight) {
           console.log('🧠 AI INSIGHTS: Insight stored in database:', newInsight.id);
-          setInsights(prev => [newInsight, ...prev]);
+          setInsights(prev => [newInsight, ...prev]); // Add new insights at the beginning
           
           // Show toast for important insights
           if (['objection', 'buying-signal', 'warning'].includes(type)) {
@@ -1139,8 +1157,8 @@ export function CallAnalyzer({ onCallEnd, desktopCallActive }: CallAnalyzerProps
               </div>
             ) : (
               <div className="space-y-4">
-                {/* ENHANCED: Display insights with color-coded backgrounds based on type */}
-                {[...insights].reverse().map((insight) => (
+                {/* ENHANCED: Display insights with newest at top and color-coded backgrounds */}
+                {insights.map((insight) => (
                   <div 
                     key={insight.id} 
                     className={cn(
