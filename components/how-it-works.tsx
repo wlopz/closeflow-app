@@ -84,18 +84,18 @@ const HowItWorks = () => {
   };
 
   return (
-    <section className="py-20" id="how-it-works">
+    <section className="py-24" id="how-it-works">
       <div className="container">
-        <div className="text-center mb-16">
-          <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-4">
+        <div className="text-center mb-20">
+          <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight mb-6">
             How CloseFlow Works
           </h2>
-          <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+          <p className="text-xl md:text-2xl text-muted-foreground max-w-3xl mx-auto leading-relaxed">
             Intuitive guidance that integrates seamlessly with your sales process.
           </p>
         </div>
         
-        <Tabs defaultValue="live-call" className="w-full max-w-4xl mx-auto" onValueChange={setActiveTab}>
+        <Tabs defaultValue="live-call" className="w-full max-w-6xl mx-auto" onValueChange={setActiveTab}>
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="live-call">Live Call Assistant</TabsTrigger>
             <TabsTrigger value="practice">Practice Mode</TabsTrigger>
@@ -103,25 +103,25 @@ const HowItWorks = () => {
           </TabsList>
           
           {Object.keys(steps).map((tabKey) => (
-            <TabsContent key={tabKey} value={tabKey} className="mt-8">
-              <div className="grid md:grid-cols-2 gap-8 items-center">
+            <TabsContent key={tabKey} value={tabKey} className="mt-12">
+              <div className="grid md:grid-cols-2 gap-12 items-center">
                 <div>
-                  <div className="space-y-8">
+                  <div className="space-y-10">
                     {steps[tabKey as keyof typeof steps].map((step, index) => (
-                      <div key={index} className="flex gap-4">
-                        <div className="flex-shrink-0 rounded-full bg-primary/10 p-4">
+                      <div key={index} className="flex gap-6">
+                        <div className="flex-shrink-0 rounded-full bg-primary/10 p-5">
                           {step.icon}
                         </div>
                         <div>
-                          <h3 className="text-xl font-semibold mb-2">{step.title}</h3>
-                          <p className="text-muted-foreground">{step.description}</p>
+                          <h3 className="text-xl font-semibold mb-3">{step.title}</h3>
+                          <p className="text-muted-foreground leading-relaxed">{step.description}</p>
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
                 
-                <Card className="overflow-hidden border-none shadow-lg">
+                <Card className="overflow-hidden border-none shadow-xl">
                   <div className="aspect-video relative bg-muted rounded-md">
                     <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
                       {activeTab === 'live-call' && (

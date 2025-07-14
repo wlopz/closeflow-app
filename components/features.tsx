@@ -55,26 +55,26 @@ const Features = () => {
   ];
 
   return (
-    <section className="py-20 bg-muted/50" id="features">
+    <section className="py-24 bg-muted/50" id="features">
       <div className="container">
-        <div className="text-center mb-16">
-          <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-4">
+        <div className="text-center mb-20">
+          <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight mb-6">
             Designed for Closers Who Care
           </h2>
-          <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+          <p className="text-xl md:text-2xl text-muted-foreground max-w-3xl mx-auto leading-relaxed">
             Tools that enhance your natural selling abilities rather than replace them.
           </p>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
           {features.map((feature, index) => (
-            <Card key={index} className="border-none shadow-sm hover:shadow-md transition-shadow">
-              <CardHeader>
-                <div className="mb-4">{feature.icon}</div>
-                <CardTitle>{feature.title}</CardTitle>
+            <Card key={index} className="border-none shadow-sm hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
+              <CardHeader className="text-center">
+                <div className="mb-6 flex justify-center">{feature.icon}</div>
+                <CardTitle className="text-lg">{feature.title}</CardTitle>
               </CardHeader>
-              <CardContent>
-                <CardDescription className="text-base">{feature.description}</CardDescription>
+              <CardContent className="text-center">
+                <CardDescription className="text-base leading-relaxed">{feature.description}</CardDescription>
               </CardContent>
             </Card>
           ))}

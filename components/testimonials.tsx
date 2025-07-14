@@ -35,20 +35,20 @@ const testimonials = [
 
 const Testimonials = () => {
   return (
-    <section className="py-20 bg-muted/30" id="testimonials">
+    <section className="py-24 bg-muted/30" id="testimonials">
       <div className="container">
-        <div className="text-center mb-16">
-          <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-4">
+        <div className="text-center mb-20">
+          <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight mb-6">
             Loved by Sales Professionals
           </h2>
-          <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+          <p className="text-xl md:text-2xl text-muted-foreground max-w-3xl mx-auto leading-relaxed">
             See how CloseFlow is helping closers connect and convert with confidence.
           </p>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
           {testimonials.map((testimonial, index) => (
-            <Card key={index} className="h-full">
+            <Card key={index} className="h-full hover:shadow-lg transition-shadow duration-300">
               <CardHeader className="pb-2">
                 <div className="flex justify-between items-start">
                   <Avatar>
@@ -64,8 +64,8 @@ const Testimonials = () => {
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className="pt-4">
-                <p className="mb-4">"{testimonial.content}"</p>
+              <CardContent className="pt-4 flex-1">
+                <p className="mb-4 leading-relaxed">"{testimonial.content}"</p>
               </CardContent>
               <CardFooter className="flex flex-col items-start pt-0">
                 <p className="font-semibold">{testimonial.name}</p>
